@@ -1,0 +1,11 @@
+apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+kind: API
+metadata:
+  name: serverless-app-http-api
+  namespace: default
+spec:
+  name: serverless-app-http-api
+  protocolType: HTTP
+  tags:
+    Environment: workshop
+    ManagedBy: ACK

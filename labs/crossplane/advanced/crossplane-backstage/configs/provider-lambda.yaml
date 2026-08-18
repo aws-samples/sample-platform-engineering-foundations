@@ -1,0 +1,8 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-lambda
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-lambda:v1.21.0
+  runtimeConfigRef:
+    name: aws-irsa-drc  

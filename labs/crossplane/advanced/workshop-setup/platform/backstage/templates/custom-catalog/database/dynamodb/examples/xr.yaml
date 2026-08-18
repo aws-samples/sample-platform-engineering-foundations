@@ -1,0 +1,44 @@
+apiVersion: database.platform.cloud/v1alpha1
+kind: DynamoDBTable
+metadata:
+  name: dynamodb-table-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      database.platform.cloud/type: dynamodbtable
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-dataplane-psp-001-us-east-1-123456789012
+    name: dynamodb-table-001
+    attribute:
+      - name: ProductId
+        type: S
+      - name: ProductName
+        type: S
+      - name: Pass
+        type: B
+    billingMode: PROVISIONED
+    globalSecondaryIndex:
+      - hashKey: ProductName
+        name: ProductNameGlobalIndex
+        nonKeyAttributes:
+          - ProductId
+        projectionType: INCLUDE
+        rangeKey: Pass
+        readCapacity: 10
+        writeCapacity: 10
+    localSecondaryIndex:
+      - name: PassLocalIndex
+        nonKeyAttributes:
+          - ProductId
+        projectionType: INCLUDE
+        rangeKey: Pass
+    readCapacity: 20
+    writeCapacity: 20
+    hashKey: ProductId
+    rangeKey: ProductName
+    tags:
+      app: "psp"

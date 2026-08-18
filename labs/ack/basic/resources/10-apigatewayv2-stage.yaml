@@ -1,0 +1,9 @@
+apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+kind: Stage
+metadata:
+  name: serverless-app-stage
+  namespace: default
+spec:
+  apiID: API_ID    # Replace with the API Gateway ID from step 07
+  stageName: "$default"
+  autoDeploy: true

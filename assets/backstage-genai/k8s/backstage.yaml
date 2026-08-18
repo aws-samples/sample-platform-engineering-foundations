@@ -1,0 +1,179 @@
+# =============================================================================
+# Backstage + GenAI plugin - deploy on the PLATFORM cluster (cluster 1)
+# =============================================================================
+# Download this file from the assets bucket (the URI is in the stack's
+# BackstageManifestS3Uri output), replace the three PLACEHOLDER_ values and
+# apply. See the step-by-step in "Setup".
+#
+# DATABASE
+#   The image uses the in-memory SQLite the Backstage scaffold itself
+#   configures. There is no PostgreSQL here, on purpose: the lab's focus is the
+#   GenAI plugin, and the catalog is re-read from the example files on every
+#   start, which is enough for the exercise. In production, use a managed
+#   database (RDS).
+#
+# HOW THE PORTAL IS PUBLISHED
+#   The ALB and CloudFront were already created by CloudFormation during account
+#   provisioning, so the portal's HTTPS URL exists before the lab starts
+#   (BackstagePortalUrl output). Here Kubernetes only registers the pod in the
+#   target group, via TargetGroupBinding.
+#
+# POINTS OF ATTENTION
+#   - The ServiceAccount MUST be named `backstage-backend` in the `backstage`
+#     namespace: that exact pair is what the EKS Pod Identity Association
+#     created by CloudFormation binds to the role with bedrock:InvokeModel
+#     permission. Renaming either breaks Bedrock access with
+#     AccessDeniedException.
+#   - No AWS credential is injected into the pod: the SDK inside the container
+#     obtains temporary credentials via the Pod Identity Agent. There is no AWS
+#     secret in this file, and that is intentional.
+#   - APP_BASE_URL must be the URL the BROWSER uses (the CloudFront one).
+#     Backstage generates its own bundle paths from it; with the wrong value
+#     the page loads blank, with no visible error.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backstage
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backstage-backend
+  namespace: backstage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backstage
+  namespace: backstage
+  labels:
+    app: backstage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backstage
+  template:
+    metadata:
+      labels:
+        app: backstage
+    spec:
+      serviceAccountName: backstage-backend
+      containers:
+        - name: backstage
+          # Replaced at deploy time by the stack's BackstageECRRepositoryUri output.
+          image: PLACEHOLDER_IMAGE_URI
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 7007
+          env:
+            # Replaced at deploy time by the stack's BackstagePortalUrl output.
+            - name: APP_BASE_URL
+              value: PLACEHOLDER_APP_BASE_URL
+            # Region used by the SDK; the model itself comes from app-config.genai.yaml.
+            - name: AWS_REGION
+              value: us-east-1
+            # The /argocd/api proxy in app-config.workshop.yaml interpolates
+            # these two. Safe defaults: without them the config read fails at
+            # boot. Module 3 swaps in the real values once Argo CD exists -
+            # until then the tab shows the configuration error, which the page
+            # uses as a diagnostic exercise.
+            - name: ARGOCD_SERVER_URL
+              value: http://argocd-server.argocd.svc.cluster.local
+            - name: ARGOCD_AUTH_TOKEN
+              value: "not-configured-yet"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+          # The GenAI plugin's own health endpoint serves as readiness:
+          # if it answers, the plugin loaded and the agent was instantiated.
+          readinessProbe:
+            httpGet:
+              path: /api/aws-genai/health
+              port: 7007
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/aws-genai/health
+              port: 7007
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backstage
+  namespace: backstage
+spec:
+  # ClusterIP, not LoadBalancer: the load balancer already exists, created by
+  # CloudFormation together with CloudFront. This Service serves as the
+  # reference for the TargetGroupBinding below.
+  type: ClusterIP
+  selector:
+    app: backstage
+  ports:
+    - name: http
+      port: 80
+      targetPort: 7007
+---
+# Binds the Service to the target group created by CloudFormation. The EKS
+# Auto Mode load balancing controller is what registers and deregisters the
+# pod IPs, so scaling or restarting the Deployment stays managed by
+# Kubernetes - the ALB just receives the targets.
+apiVersion: eks.amazonaws.com/v1
+kind: TargetGroupBinding
+metadata:
+  name: backstage
+  namespace: backstage
+spec:
+  # Replaced at deploy time by the stack's BackstageTargetGroupArn output.
+  targetGroupARN: PLACEHOLDER_TARGET_GROUP_ARN
+  # Must match the TargetType of the target group created by CloudFormation.
+  targetType: ip
+  serviceRef:
+    name: backstage
+    port: 80
+---
+# Minimal RBAC for the Backstage Kubernetes plugin: the tab reads these types
+# and nothing else. The service account is the Pod Identity one (backstage-backend).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backstage-kubernetes-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, configmaps, limitranges, resourcequotas]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backstage-kubernetes-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backstage-kubernetes-reader
+subjects:
+  - kind: ServiceAccount
+    name: backstage-backend
+    namespace: backstage

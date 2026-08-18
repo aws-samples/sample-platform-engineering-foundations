@@ -1,0 +1,110 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapirests.apigateway.entrypoint.platform.cloud
+spec:
+  group: apigateway.entrypoint.platform.cloud
+  names:
+    kind: XApiRest
+    plural: xapirests
+  claimNames:
+    kind: ApiRest
+    plural: apirests
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Api Gateway configuration parameters.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted
+                        Either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    name:
+                      type: string
+                      description: >-
+                        Name of the spa and its resources.
+                    apiDescription:
+                      description: >-
+                        Set the description of the API in AWS to the value provided by this field.
+                      type: string
+                    endpointType:
+                      description: >-
+                        Set the type of the API endpoint to the value provided by this field.
+                        It can be REGIONAL, PRIVATE, EDGE
+                      type: string
+                      enum:
+                        - REGIONAL
+                        - PRIVATE
+                        - EDGE
+                      default: PRIVATE
+                    openApiSpecification:
+                      description: >-
+                        Set the OpenAPI specification of the API to the value provided by this field.
+                      type: string
+                    logRetentionPeriod:
+                      description: >-
+                        Set the log retention period in days for the API Gateway logs.
+                      type: number
+                      default: 30
+                    logLevel:
+                      description: >-
+                        Set the level of the API execution logs.
+                        It can be OFF, ERROR or INFO.
+                      type: string
+                      enum:
+                        - OFF
+                        - ERROR
+                        - INFO
+                      default: INFO
+                    stageName:
+                      description: >-
+                        Name of the stage. Default is api.
+                      type: string
+                      default: api
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - name
+                    - openApiSpecification
+                    - endpointType
+                    - logRetentionPeriod
+                    - logLevel
+                    - stageName
+                    - tags
+              required:
+                - parameters
+            status:
+              properties:
+                accessLogsGroupArn:
+                  type: string
+                  description: >-
+                    Access Log Group ARN in CloudWatch Logs

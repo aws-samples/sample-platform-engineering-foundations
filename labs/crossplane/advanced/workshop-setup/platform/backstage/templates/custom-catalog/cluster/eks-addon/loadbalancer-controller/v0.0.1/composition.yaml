@@ -1,0 +1,470 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xlbcontroller.addon.cluster.platform.cloud
+  labels:
+    addon.cluster.platform.cloud/type: lbcontroller
+    lbcontroller.addon.cluster.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: addon.cluster.platform.cloud/v1alpha1
+    kind: XLBController
+  mode: Pipeline
+  pipeline:
+    - step: configure-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+                policy:
+                  toFieldPath: ForceMergeObjectsAppendArrays
+
+        resources:
+          - name: loadbalancer-controller-policy
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Policy
+              metadata:
+                labels:
+                  policy: loadbalancer-controller
+              spec:
+                forProvider:
+                  policy: |
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "iam:CreateServiceLinkedRole"
+                                ],
+                                "Resource": "*",
+                                "Condition": {
+                                    "StringEquals": {
+                                        "iam:AWSServiceName": "elasticloadbalancing.amazonaws.com"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:DescribeAccountAttributes",
+                                    "ec2:DescribeAddresses",
+                                    "ec2:DescribeAvailabilityZones",
+                                    "ec2:DescribeInternetGateways",
+                                    "ec2:DescribeVpcs",
+                                    "ec2:DescribeVpcPeeringConnections",
+                                    "ec2:DescribeSubnets",
+                                    "ec2:DescribeSecurityGroups",
+                                    "ec2:DescribeInstances",
+                                    "ec2:DescribeNetworkInterfaces",
+                                    "ec2:DescribeTags",
+                                    "ec2:GetCoipPoolUsage",
+                                    "ec2:DescribeCoipPools",
+                                    "elasticloadbalancing:DescribeLoadBalancers",
+                                    "elasticloadbalancing:DescribeLoadBalancerAttributes",
+                                    "elasticloadbalancing:DescribeListeners",
+                                    "elasticloadbalancing:DescribeListenerCertificates",
+                                    "elasticloadbalancing:DescribeSSLPolicies",
+                                    "elasticloadbalancing:DescribeRules",
+                                    "elasticloadbalancing:DescribeTargetGroups",
+                                    "elasticloadbalancing:DescribeTargetGroupAttributes",
+                                    "elasticloadbalancing:DescribeTargetHealth",
+                                    "elasticloadbalancing:DescribeTags",
+                                    "elasticloadbalancing:DescribeTrustStores"
+                                ],
+                                "Resource": "*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "cognito-idp:DescribeUserPoolClient",
+                                    "acm:ListCertificates",
+                                    "acm:DescribeCertificate",
+                                    "iam:ListServerCertificates",
+                                    "iam:GetServerCertificate",
+                                    "waf-regional:GetWebACL",
+                                    "waf-regional:GetWebACLForResource",
+                                    "waf-regional:AssociateWebACL",
+                                    "waf-regional:DisassociateWebACL",
+                                    "wafv2:GetWebACL",
+                                    "wafv2:GetWebACLForResource",
+                                    "wafv2:AssociateWebACL",
+                                    "wafv2:DisassociateWebACL",
+                                    "shield:GetSubscriptionState",
+                                    "shield:DescribeProtection",
+                                    "shield:CreateProtection",
+                                    "shield:DeleteProtection"
+                                ],
+                                "Resource": "*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:AuthorizeSecurityGroupIngress",
+                                    "ec2:RevokeSecurityGroupIngress"
+                                ],
+                                "Resource": "*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:CreateSecurityGroup"
+                                ],
+                                "Resource": "*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:CreateTags"
+                                ],
+                                "Resource": "arn:aws:ec2:*:*:security-group/*",
+                                "Condition": {
+                                    "StringEquals": {
+                                        "ec2:CreateAction": "CreateSecurityGroup"
+                                    },
+                                    "Null": {
+                                        "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:CreateTags",
+                                    "ec2:DeleteTags"
+                                ],
+                                "Resource": "arn:aws:ec2:*:*:security-group/*",
+                                "Condition": {
+                                    "Null": {
+                                        "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:AuthorizeSecurityGroupIngress",
+                                    "ec2:RevokeSecurityGroupIngress",
+                                    "ec2:DeleteSecurityGroup"
+                                ],
+                                "Resource": "*",
+                                "Condition": {
+                                    "Null": {
+                                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:CreateLoadBalancer",
+                                    "elasticloadbalancing:CreateTargetGroup"
+                                ],
+                                "Resource": "*",
+                                "Condition": {
+                                    "Null": {
+                                        "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:CreateListener",
+                                    "elasticloadbalancing:DeleteListener",
+                                    "elasticloadbalancing:CreateRule",
+                                    "elasticloadbalancing:DeleteRule"
+                                ],
+                                "Resource": "*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:AddTags",
+                                    "elasticloadbalancing:RemoveTags"
+                                ],
+                                "Resource": [
+                                    "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+                                ],
+                                "Condition": {
+                                    "Null": {
+                                        "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:AddTags",
+                                    "elasticloadbalancing:RemoveTags"
+                                ],
+                                "Resource": [
+                                    "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*"
+                                ]
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                                    "elasticloadbalancing:SetIpAddressType",
+                                    "elasticloadbalancing:SetSecurityGroups",
+                                    "elasticloadbalancing:SetSubnets",
+                                    "elasticloadbalancing:DeleteLoadBalancer",
+                                    "elasticloadbalancing:ModifyTargetGroup",
+                                    "elasticloadbalancing:ModifyTargetGroupAttributes",
+                                    "elasticloadbalancing:DeleteTargetGroup"
+                                ],
+                                "Resource": "*",
+                                "Condition": {
+                                    "Null": {
+                                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:AddTags"
+                                ],
+                                "Resource": [
+                                    "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+                                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+                                ],
+                                "Condition": {
+                                    "StringEquals": {
+                                        "elasticloadbalancing:CreateAction": [
+                                            "CreateTargetGroup",
+                                            "CreateLoadBalancer"
+                                        ]
+                                    },
+                                    "Null": {
+                                        "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+                                    }
+                                }
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:RegisterTargets",
+                                    "elasticloadbalancing:DeregisterTargets"
+                                ],
+                                "Resource": "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "elasticloadbalancing:SetWebAcl",
+                                    "elasticloadbalancing:ModifyListener",
+                                    "elasticloadbalancing:AddListenerCertificates",
+                                    "elasticloadbalancing:RemoveListenerCertificates",
+                                    "elasticloadbalancing:ModifyRule"
+                                ],
+                                "Resource": "*"
+                            }
+                        ]
+                    }
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-eks-lb-policy"
+
+          - name: loadbalancer-controller-role
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                labels:
+                  role: loadbalancer-controller
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "status.atProvider.arn"
+                toFieldPath: "status.cluster.loadBalancerControllerAddonRoleArn"
+                type: ToCompositeFieldPath
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |
+                      {
+                          "Version": "2012-10-17",
+                          "Statement": [
+                              {
+                                  "Effect": "Allow",
+                                  "Principal": {
+                                      "Federated": "arn:aws:iam::%[2]s:oidc-provider/%[1]s"
+                                  },
+                                  "Action": "sts:AssumeRoleWithWebIdentity",
+                                  "Condition": {
+                                      "StringEquals": {
+                                          "%[1]s:sub": "system:serviceaccount:kube-system:load-balancer-controller-sa",
+                                          "%[1]s:aud": "sts.amazonaws.com"
+                                      }
+                                  }
+                              }
+                          ]
+                      }
+                  variables:
+                    - fromFieldPath: spec.parameters.cluster.oidcUri
+                    - fromFieldPath: spec.parameters.accountId
+                toFieldPath: spec.forProvider.assumeRolePolicy
+                type: CombineFromComposite
+              - fromFieldPath: "metadata.name"
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-eks-lb-role"
+
+          - name: loadbalancer-controller-role-attachment
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                forProvider:
+                  policyArnSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      policy: loadbalancer-controller
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      role: loadbalancer-controller
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+
+          - name: loadbalancer-controller-service-account
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ServiceAccount
+                    metadata:
+                      name: load-balancer-controller-sa
+                      namespace: kube-system
+            patches:
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.kubernetesTargetProviderConfigRef"
+                toFieldPath: "spec.providerConfigRef"
+              - fromFieldPath: status.cluster.loadBalancerControllerAddonRoleArn
+                toFieldPath: spec.forProvider.manifest.metadata.annotations[eks.amazonaws.com/role-arn]
+                type: FromCompositeFieldPath
+                policy:
+                  fromFieldPath: Required
+
+          - name: load-balancer-controller-addon
+            base:
+              apiVersion: helm.crossplane.io/v1beta1
+              kind: Release
+              metadata:
+                annotations:
+                  crossplane.io/external-name: aws-load-balancer-controller
+              spec:
+                forProvider:
+                  chart:
+                    name: aws-load-balancer-controller
+                    repository: https://aws.github.io/eks-charts
+                    version: "1.11.0"
+                  namespace: kube-system
+                  set:
+                    - name: vpcId
+                    - name: clusterName
+                    - name: serviceAccount.create
+                      value: "false"
+                    - name: serviceAccount.name
+                      value: load-balancer-controller-sa
+                    - name: region
+                    - name: ingressClassParams.create
+                      value: "false"
+                  values:
+                    image:
+                      pullPolicy: IfNotPresent
+            patches:
+              - fromFieldPath: "spec.parameters.helmTargetProviderConfigRef"
+                toFieldPath: "spec.providerConfigRef"
+              - fromFieldPath: "spec.parameters.loadbalancerController.image"
+                toFieldPath: spec.forProvider.values.image.repository
+              - fromFieldPath: "spec.parameters.loadbalancerController.tag"
+                toFieldPath: spec.forProvider.values.image.tag
+              - fromFieldPath: spec.parameters.cluster.name
+                toFieldPath: spec.forProvider.set[1].value
+                type: FromCompositeFieldPath
+              - fromFieldPath: "status.atProvider.state"
+                toFieldPath: "status.cluster.loadBalancerControllerReleaseStatus"
+              - fromFieldPath: "spec.parameters.vpcId"
+                toFieldPath: spec.forProvider.set[0].value
+              - fromFieldPath: "spec.parameters.region"
+                toFieldPath: spec.forProvider.set[4].value
+
+          - name: ingress-class-params
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: elbv2.k8s.aws/v1beta1
+                    kind: IngressClassParams
+                    metadata:
+                      name: alb
+            patches:
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.kubernetesTargetProviderConfigRef"
+                toFieldPath: "spec.providerConfigRef"
+
+    - step: auto-detect-ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,8 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: FunctionRevision
+metadata:
+  name: function-auto-ready-v1
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.1.0
+  revision: 1
+  desiredState: Active

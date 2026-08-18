@@ -1,0 +1,124 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xlambdafunctions.compute.platform.cloud
+spec:
+  group: compute.platform.cloud
+  names:
+    kind: XLambdaFunction
+    plural: xlambdafunctions
+  claimNames:
+    kind: LambdaFunction
+    plural: lambdafunctions
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Lambda Function configuration parameters.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted
+                        Either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    name:
+                      type: string
+                      description: >-
+                        Name of the spa and its resources.
+                    handler:
+                      type: string
+                      description: "Function entry point in your code."
+                    packageType:
+                      type: string
+                      description: "Lambda deployment package type."
+                      enum: ["Zip", "Image"]
+                    runtime:
+                      type: string
+                      description: "Runtime environment for the Lambda function."
+                    s3Bucket:
+                      type: string
+                      description: "S3 bucket containing the function's deployment package."
+                    s3Key:
+                      type: string
+                      description: "S3 key of the function's deployment package."
+                    timeout:
+                      type: integer
+                      description: "Amount of time function is allowed to run in seconds."
+                    roleArn:
+                      type: string
+                      description: "Amazon Resource Name (ARN) of the function's execution role."
+                    memorySize:
+                      type: integer
+                      description: "Amount of memory available to the function during execution in MB"
+                    vpcConfig:
+                      type: object
+                      description: "VPC configuration for the Lambda function."
+                      properties:
+                        securityGroupIds:
+                          type: array
+                          items:
+                            type: string
+                        subnetIds:
+                          type: array
+                          items:
+                            type: string
+                    variables:
+                      type: object
+                      description: "Environment variables to the lambda function."
+                      x-kubernetes-preserve-unknown-fields: true
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - name
+                    - handler
+                    - packageType
+                    - runtime
+                    - s3Bucket
+                    - s3Key
+                    - timeout
+                    - roleArn
+                    - memorySize
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                Object with relevant information resulting from 
+                this composition to be used by other compositions.
+              properties:
+                lambdaName:
+                  type: string
+                  description: >-
+                    ID of the managed resource.
+                lambdaArn:
+                  type: string
+                  description: >-
+                    ARN of the managed resource.

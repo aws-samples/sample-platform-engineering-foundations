@@ -1,0 +1,103 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: serverless-multi-tier
+  title: Serverless Multi-Tier Architecture
+  description: Lambda with API Gateway and DynamoDB
+spec:
+  owner: guest
+  type: service
+  parameters:
+    - title: Configuration Options   # Defines the parameters the user must provide when using the template
+      required:
+        - name
+        - repoUrl
+        - namespace
+        - region
+        - hashKey
+        - size
+      properties:
+        region:
+          description: AWS Region
+          title: AWS Region
+          type: string
+        hashKey:
+          description: DynamoDB hashkey
+          title: DynamoDB hashkey
+          type: string
+        repoUrl:
+          description: Gitea URL on management cluster
+          title: Gitea URL
+          type: string
+        name:
+          title: Application Name
+          type: string
+          description: Unique name of the database
+        namespace:
+          default: default
+          title: Existing namespace to create this resource
+          type: string
+        size:
+          type: string
+          title: Lambda Size
+          description: Lambda Size
+          enum:
+            - small
+            - medium
+        # size:
+        #   default: default
+        #   title: path API
+        #   type: string
+  steps:
+    - id: fetch-base
+      name: Fetch Base
+      action: fetch:template
+      input:
+        url: ./skeleton/  # Replaces variables inside the template with the values entered in the form
+        values:
+          name: ${{ parameters.name }}
+          repoUrl: ${{ parameters.repoUrl }}
+          namespace: ${{ parameters.namespace }}
+          region: ${{ parameters.region }}
+          hashKey: ${{ parameters.hashKey }}
+          size: ${{ parameters.size }}
+
+    - id: publish # Publishes the generated files to Gitea
+      name: Publishing to a Gitea repository
+      action: publish:gitea
+      input:
+        description: Lambda with DynamoDB
+        repoUrl: ${{parameters.repoUrl}}?repo=${{parameters.name}}
+        defaultBranch: main
+
+    - id: create-argocd-app
+      name: Create ArgoCD App
+      action: cnoe:create-argocd-app
+      input:
+        appName: ${{ parameters.name }}
+        appNamespace: default
+        argoInstance: in-cluster
+        projectName: default
+        repoUrl: http://my-gitea-http.gitea.svc.cluster.local:3000/giteaAdmin/${{ parameters.name }}
+        path: "manifests"
+
+    - id: register # Registers the repository in the Backstage catalog
+      name: Register
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: 'catalog-info.yaml'
+
+    - id: template-output
+      name: Template Output
+      action: debug:log
+      input:
+        listWorkspace: true
+
+  output:
+    links:
+      - title: Repository   # Defines the output links displayed after the template runs
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

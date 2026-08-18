@@ -1,0 +1,29 @@
+apiVersion: lambda.services.k8s.aws/v1alpha1
+kind: Function
+metadata:
+  name: serverless-app-backend
+  namespace: default
+spec:
+  name: serverless-app-backend
+  runtime: python3.12
+  handler: index.handler
+  memorySize: 256
+  timeout: 30
+  role: LAMBDA_ROLE_ARN    # Replace with the IAM Role ARN from step 04
+  code:
+    s3Bucket: LAMBDA_BUCKET    # Replace with your S3 bucket name
+    s3Key: lambda/backend.zip
+  vpcConfig:
+    subnetIDs:
+      - SUBNET_ID_1    # Replace with your private subnet ID
+      - SUBNET_ID_2    # Replace with your private subnet ID
+    securityGroupIDs:
+      - LAMBDA_SG_ID    # Replace with the Lambda Security Group ID from step 05
+  environment:
+    variables:
+      DB_HOST: "pending"    # Update after RDS is ready
+      DB_NAME: appdb
+      DB_PORT: "5432"
+  tags:
+    Environment: workshop
+    ManagedBy: ACK

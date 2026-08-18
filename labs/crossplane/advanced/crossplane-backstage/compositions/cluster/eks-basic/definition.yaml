@@ -1,0 +1,206 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xeksbasics.cluster.platform.cloud
+spec:
+  group: cluster.platform.cloud
+  names:
+    kind: XEksBasic
+    plural: xeksbasics
+  claimNames:
+    kind: EksBasic
+    plural: eksbasics
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the compute container.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this 
+                        managed resource is deleted - either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    region:
+                      type: string
+                      description: "AWS region where the EKS cluster is created."
+                      default: "us-east-1"
+                    clusterVersion:
+                      type: string
+                      description: "Kubernetes version for the EKS cluster."
+                      default: "1.27"
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace to save the cluste connection data
+                    acronym:
+                      type: string
+                      description: >-
+                        Acronym of the cluster owner
+                    accountId:
+                      type: string
+                      description: >-
+                        Account ID to deploy the cluster
+                    subnetIds:
+                      type: array
+                      description: "List of subnet IDs for the EKS cluster."
+                      items:
+                        type: string
+                    vpcId:
+                      type: string
+                      description: "ID of the VPC where the EKS cluster is created."
+                    securityGroup:
+                      type: object
+                      description: >-
+                        Settings of rules to allow in app security group.
+                      properties:
+                        ingress:
+                          type: object
+                          description: >-
+                            Ingress block to allow in app security group.
+                          properties:
+                            cidrs:
+                              type: array
+                              description: >-
+                                List of CIDR blocks.
+                              items:
+                                type: string
+                            fromPort:
+                              type: number
+                              description: >-
+                                Start port (or ICMP type number if protocol is "icmp" or "icmpv6").
+                            toPort:
+                              type: number
+                              description: >-
+                                End port (or ICMP code if protocol is "icmp").
+                            self:
+                              type: boolean
+                              description: >-
+                                Source is the self securitygroup
+                              default: false
+                            protocol:
+                              type: string
+                              description: >-
+                                Protocol to allow.
+                          required:
+                            - fromPort
+                            - toPort
+                        egress:
+                          type: object
+                          description: >-
+                            Egress block to allow in app security group.
+                          properties:
+                            cidrs:
+                              type: array
+                              description: >-
+                                List of CIDR blocks.
+                              items:
+                                type: string
+                            fromPort:
+                              type: number
+                              description: >-
+                                Start port (or ICMP type number if protocol is "icmp" or "icmpv6").
+                            toPort:
+                              type: number
+                              description: >-
+                                End port (or ICMP code if protocol is "icmp").
+                            self:
+                              type: boolean
+                              description: >-
+                                Source is the self securitygroup
+                              default: false
+                            protocol:
+                              type: string
+                              description: >-
+                                Protocol to allow.
+                          required:
+                            - fromPort
+                            - toPort
+                      required:
+                        - ingress
+                        - egress
+                    nodeCount:
+                      type: integer
+                      description: "Number of nodes in the managed node group."
+                      default: 3
+                    minNodeCount:
+                      type: integer
+                      description: "Minimum number of worker nodes."
+                      default: 1
+                    maxNodeCount:
+                      type: integer
+                      description: "Maximum number of worker nodes."
+                      default: 5
+                    nodeInstanceType:
+                      type: string
+                      description: "Instance type for worker nodes."
+                      default: "t3.medium"
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - clusterVersion
+                    - namespace
+                    - acronym
+                    - accountId
+                    - subnetIds
+                    - vpcId
+                    - securityGroup
+                    - nodeCount
+                    - minNodeCount
+                    - maxNodeCount
+                    - nodeInstanceType
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                A Status represents the observed state
+              properties:
+                cluster:
+                  type: object
+                  description: >-
+                    Bucket to store the logs.
+                  properties:
+                    clusterName:
+                      description: >-
+                        Name of the cluster
+                      type: string
+                    nodeGroupRoleArn:
+                      description: >-
+                        ARN of the node group role
+                      type: string
+                    oidc:
+                      description: >-
+                        Cluster OIDC configuration
+                      type: string
+                    oidcArn:
+                      description: >-
+                        Cluster OIDC ARN
+                      type: string
+                    oidcUri:
+                      description: >-
+                        Cluster OIDC URI
+                      type: string

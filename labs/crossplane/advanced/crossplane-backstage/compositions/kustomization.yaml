@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - bucket/logging
+  - bucket/webhost
+  - database/postgresql
+  - database/dynamodb
+  - frontend/spa
+  - compute/container
+  - compute/lambda
+  - network/basic
+  - cluster/eks-basic
+  - cluster/eks-addon/loadbalancer-controller
+  - entrypoint/api-gateway/rest
+  - app/fullstack
+  - app/serverless-multi-tier

@@ -1,0 +1,17 @@
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: serverless-app-frontend
+  namespace: default
+spec:
+  name: serverless-app-frontend-ACCOUNT_ID    # Replace ACCOUNT_ID for uniqueness
+  publicAccessBlock:
+    blockPublicAcls: true
+    blockPublicPolicy: true
+    ignorePublicAcls: true
+    restrictPublicBuckets: true
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

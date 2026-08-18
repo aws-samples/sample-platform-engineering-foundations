@@ -1,0 +1,801 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: serverlessapp.awsblueprints.io
+  labels:
+    awsblueprints.io/provider: aws
+    awsblueprints.io/environment: dev
+spec:
+  compositeTypeRef:
+    apiVersion: awsblueprints.io/v1alpha1
+    kind: XServerlessApp
+  mode: Pipeline
+  pipeline:
+    # ---------------------------------------------------------------
+    # Step 1 – Patch-and-Transform: define all managed resources
+    # ---------------------------------------------------------------
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ==========================================================
+          # 1. RDS Security Group
+          # ==========================================================
+          - name: rds-security-group
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: SecurityGroup
+              metadata:
+                labels:
+                  awsblueprints.io/resource: rds-security-group
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  description: "Allow PostgreSQL access from Lambda"
+                  name: ""          # patched
+                  region: ""        # patched
+                  vpcId: ""         # patched
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.vpcId
+                toFieldPath: spec.forProvider.vpcId
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-rds-sg"
+                toFieldPath: spec.forProvider.name
+
+          # ==========================================================
+          # 2. RDS SG – Ingress rule (PostgreSQL 5432)
+          # ==========================================================
+          - name: rds-sg-rule-ingress
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: SecurityGroupIngressRule
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  securityGroupIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: rds-security-group
+                  ipProtocol: tcp
+                  fromPort: 5432
+                  toPort: 5432
+                  cidrIpv4: "10.0.0.0/8"
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 3. RDS DB Subnet Group
+          # ==========================================================
+          - name: rds-subnet-group
+            base:
+              apiVersion: rds.aws.upbound.io/v1beta1
+              kind: SubnetGroup
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  description: "Subnet group for serverless app RDS"
+                  region: ""
+                  subnetIds: []    # patched
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.subnetIds
+                toFieldPath: spec.forProvider.subnetIds
+
+          # ==========================================================
+          # 4. RDS PostgreSQL Instance
+          # ==========================================================
+          - name: rds-instance
+            base:
+              apiVersion: rds.aws.upbound.io/v1beta2
+              kind: Instance
+              metadata:
+                labels:
+                  awsblueprints.io/resource: rds-instance
+                name: rds-instance
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  engine: postgres
+                  engineVersion: "17.4"
+                  instanceClass: db.t3.medium
+                  allocatedStorage: 20
+                  dbName: appdb
+                  username: postgres
+                  autoGeneratePassword: true
+                  manageMasterUserPassword: true
+                  publiclyAccessible: false
+                  skipFinalSnapshot: true
+                  storageEncrypted: true
+                  dbSubnetGroupNameSelector:
+                    matchControllerRef: true
+                  vpcSecurityGroupIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: rds-security-group
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.dbEngine
+                toFieldPath: spec.forProvider.engine
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.dbEngineVersion
+                toFieldPath: spec.forProvider.engineVersion
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.dbInstanceClass
+                toFieldPath: spec.forProvider.instanceClass
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.storageGB
+                toFieldPath: spec.forProvider.allocatedStorage
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.databaseName
+                toFieldPath: spec.forProvider.dbName
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-rds"
+                toFieldPath: spec.forProvider.identifier
+
+          # ==========================================================
+          # 5. IAM Role for Lambda execution
+          # ==========================================================
+          - name: lambda-execution-role
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                labels:
+                  awsblueprints.io/resource: lambda-role
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  assumeRolePolicy: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": { "Service": "lambda.amazonaws.com" },
+                        "Action": "sts:AssumeRole"
+                      }]
+                    }
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-lambda-role"
+                toFieldPath: metadata.name
+
+          # ==========================================================
+          # 6. Attach AWSLambdaVPCAccessExecutionRole managed policy
+          # ==========================================================
+          - name: lambda-vpc-policy-attachment
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: lambda-role
+
+          # ==========================================================
+          # 7. Lambda Security Group
+          # ==========================================================
+          - name: lambda-security-group
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: SecurityGroup
+              metadata:
+                labels:
+                  awsblueprints.io/resource: lambda-security-group
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  description: "Security group for Lambda functions"
+                  name: ""
+                  region: ""
+                  vpcId: ""
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.vpcId
+                toFieldPath: spec.forProvider.vpcId
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-lambda-sg"
+                toFieldPath: spec.forProvider.name
+
+          # ==========================================================
+          # 8. Lambda Function (backend)
+          # ==========================================================
+          - name: lambda-function
+            base:
+              apiVersion: lambda.aws.upbound.io/v1beta2
+              kind: Function
+              metadata:
+                labels:
+                  awsblueprints.io/resource: lambda-function
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  runtime: python3.12
+                  handler: index.handler
+                  memorySize: 256
+                  timeout: 30
+                  s3Bucket: ""
+                  s3Key: ""
+                  role: ""
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: lambda-role
+                  vpcConfig:
+                    subnetIds: []
+                    securityGroupIdSelector:
+                      matchControllerRef: true
+                      matchLabels:
+                        awsblueprints.io/resource: lambda-security-group
+                  environment:
+                    variables:
+                      DB_HOST: "pending"   # populated via status after RDS is ready
+                      DB_NAME: appdb
+                      DB_PORT: "5432"
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaRuntime
+                toFieldPath: spec.forProvider.runtime
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaHandler
+                toFieldPath: spec.forProvider.handler
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaMemoryMB
+                toFieldPath: spec.forProvider.memorySize
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaTimeoutSeconds
+                toFieldPath: spec.forProvider.timeout
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaS3Bucket
+                toFieldPath: spec.forProvider.s3Bucket
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.lambdaS3Key
+                toFieldPath: spec.forProvider.s3Key
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.subnetIds
+                toFieldPath: spec.forProvider.vpcConfig.subnetIds
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.databaseName
+                toFieldPath: spec.forProvider.environment.variables.DB_NAME
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-backend"
+                toFieldPath: metadata.name
+
+          # ==========================================================
+          # 9. Lambda Permission – allow API Gateway invocation
+          # ==========================================================
+          - name: lambda-permission-apigw
+            base:
+              apiVersion: lambda.aws.upbound.io/v1beta1
+              kind: Permission
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  action: "lambda:InvokeFunction"
+                  principal: apigateway.amazonaws.com
+                  functionNameSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: lambda-function
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 10. API Gateway v2 (HTTP API)
+          # ==========================================================
+          - name: api-gateway
+            base:
+              apiVersion: apigatewayv2.aws.upbound.io/v1beta1
+              kind: API
+              metadata:
+                labels:
+                  awsblueprints.io/resource: api-gateway
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  protocolType: HTTP
+                  name: ""
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-http-api"
+                toFieldPath: spec.forProvider.name
+
+          # ==========================================================
+          # 11. API Gateway Integration (Lambda proxy)
+          # ==========================================================
+          - name: apigw-integration
+            base:
+              apiVersion: apigatewayv2.aws.upbound.io/v1beta1
+              kind: Integration
+              metadata:
+                labels:
+                  awsblueprints.io/resource: apigw-integration
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  apiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: api-gateway
+                  integrationType: AWS_PROXY
+                  integrationMethod: POST
+                  payloadFormatVersion: "2.0"
+                  integrationUriSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: lambda-function
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 12. API Gateway Route (catch-all)
+          # ==========================================================
+          - name: apigw-route
+            base:
+              apiVersion: apigatewayv2.aws.upbound.io/v1beta1
+              kind: Route
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  apiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: api-gateway
+                  routeKey: "ANY /"
+                  targetSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: apigw-integration
+                  # target is auto-resolved via integration
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 13. API Gateway Stage ($default, auto-deploy)
+          # ==========================================================
+          - name: apigw-stage
+            base:
+              apiVersion: apigatewayv2.aws.upbound.io/v1beta2
+              kind: Stage
+              metadata:
+                labels:
+                  awsblueprints.io/resource: api-gateway-stage
+                name: "prod"
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  apiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: api-gateway
+                  autoDeploy: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 14. S3 Bucket (frontend static assets)
+          # ==========================================================
+          - name: frontend-bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta2
+              kind: Bucket
+              metadata:
+                labels:
+                  awsblueprints.io/resource: frontend-bucket
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  forceDestroy: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                    - fromFieldPath: metadata.uid
+                  strategy: string
+                  string:
+                    fmt: "%s-frontend-%s"
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.bucketRegionalDomainName
+                toFieldPath: status.frontendBucketDomainName
+                policy:
+                  fromFieldPath: Optional
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.frontendBucketArn
+                policy:
+                  fromFieldPath: Optional
+
+          # ==========================================================
+          # 15. S3 Bucket Public Access Block
+          # ==========================================================
+          - name: frontend-bucket-public-access-block
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: frontend-bucket
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+
+          # ==========================================================
+          # 16. CloudFront Origin Access Identity
+          # ==========================================================
+          - name: cloudfront-oai
+            base:
+              apiVersion: cloudfront.aws.upbound.io/v1beta1
+              kind: OriginAccessIdentity
+              metadata:
+                labels:
+                  awsblueprints.io/resource: cloudfront-oai
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  comment: ""
+                  region: us-east-1
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "OAI for %s frontend"
+                toFieldPath: spec.forProvider.comment
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.iamArn
+                toFieldPath: status.cloudfrontOaiIamArn
+                policy:
+                  fromFieldPath: Optional
+
+          # ==========================================================
+          # 17. S3 Bucket Policy (allow CloudFront OAI read access)
+          # ==========================================================
+          - name: frontend-bucket-policy
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPolicy
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: ""
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      awsblueprints.io/resource: frontend-bucket
+                  policy: ""
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: status.frontendBucketArn
+                    - fromFieldPath: status.cloudfrontOaiIamArn
+                  strategy: string
+                  string:
+                    fmt: '{"Version":"2012-10-17","Statement":[{"Sid":"AllowCloudFrontOAI","Effect":"Allow","Principal":{"AWS":"%[2]s"},"Action":"s3:GetObject","Resource":"%[1]s/*"}]}'
+                toFieldPath: spec.forProvider.policy
+                policy:
+                  fromFieldPath: Required
+
+          # ==========================================================
+          # 18. CloudFront Distribution
+          # ==========================================================
+          - name: cloudfront-distribution
+            base:
+              apiVersion: cloudfront.aws.upbound.io/v1beta2
+              kind: Distribution
+              metadata:
+                labels:
+                  awsblueprints.io/resource: cloudfront-distribution
+              spec:
+                providerConfigRef:
+                  name: controlplane
+                forProvider:
+                  region: us-east-1
+                  enabled: true
+                  defaultRootObject: index.html
+                  priceClass: PriceClass_100
+                  defaultCacheBehavior:
+                    allowedMethods:
+                      - GET
+                      - HEAD
+                    cachedMethods:
+                      - GET
+                      - HEAD
+                    targetOriginId: s3-frontend
+                    viewerProtocolPolicy: redirect-to-https
+                    forwardedValues:
+                      queryString: false
+                      cookies:
+                        forward: none
+                  origin:
+                    - originId: s3-frontend
+                      domainName: ""
+                      s3OriginConfig:
+                        originAccessIdentitySelector:
+                          matchControllerRef: true
+                          matchLabels:
+                            awsblueprints.io/resource: cloudfront-oai
+                  restrictions:
+                    geoRestriction:
+                      restrictionType: none
+                  viewerCertificate:
+                    cloudfrontDefaultCertificate: true
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.appName
+                  strategy: string
+                  string:
+                    fmt: "%s-cdn"
+                toFieldPath: spec.forProvider.comment
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.frontendBucketDomainName
+                toFieldPath: spec.forProvider.origin[0].domainName
+                policy:
+                  fromFieldPath: Required
+
+          # ==========================================================
+          # 19. Namespace on cluster-3 (apps cluster)
+          # ==========================================================
+          - name: app-namespace
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              metadata:
+                labels:
+                  awsblueprints.io/resource: app-namespace
+              spec:
+                providerConfigRef:
+                  name: cluster-3-apps
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      name: ""    # patched
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.metadata.name
+
+          # ==========================================================
+          # 20. Deployment on cluster-3 (sample app container)
+          # ==========================================================
+          - name: app-deployment
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              metadata:
+                labels:
+                  awsblueprints.io/resource: app-deployment
+              spec:
+                providerConfigRef:
+                  name: cluster-3-apps
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: ""    # patched
+                      namespace: ""    # patched
+                    spec:
+                      replicas: 2
+                      selector:
+                        matchLabels:
+                          app: ""    # patched
+                      template:
+                        metadata:
+                          labels:
+                            app: ""    # patched
+                        spec:
+                          containers:
+                            - name: app
+                              image: ""    # patched
+                              ports:
+                                - containerPort: 80
+                              env:
+                                - name: DB_HOST
+                                  value: "pending"
+                                - name: DB_NAME
+                                  value: appdb
+                                - name: DB_PORT
+                                  value: "5432"
+                                - name: APP_NAME
+                                  value: ""
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 128Mi
+                                limits:
+                                  cpu: 250m
+                                  memory: 256Mi
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.spec.selector.matchLabels.app
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.spec.template.metadata.labels.app
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appImage
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].image
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appReplicas
+                toFieldPath: spec.forProvider.manifest.spec.replicas
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appPort
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].ports[0].containerPort
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[3].value
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.databaseName
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[1].value
+
+          # ==========================================================
+          # 21. Service on cluster-3 (expose the app)
+          # ==========================================================
+          - name: app-service
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              metadata:
+                labels:
+                  awsblueprints.io/resource: app-service
+              spec:
+                providerConfigRef:
+                  name: cluster-3-apps
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: ""    # patched
+                      namespace: ""    # patched
+                    spec:
+                      selector:
+                        app: ""    # patched
+                      ports:
+                        - port: 80
+                          targetPort: 80
+                          protocol: TCP
+                      type: ClusterIP
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appName
+                toFieldPath: spec.forProvider.manifest.spec.selector.app
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.appPort
+                toFieldPath: spec.forProvider.manifest.spec.ports[0].targetPort
+
+    # ---------------------------------------------------------------
+    # Step 2 – Auto-ready: mark XR ready when all resources are ready
+    # ---------------------------------------------------------------
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

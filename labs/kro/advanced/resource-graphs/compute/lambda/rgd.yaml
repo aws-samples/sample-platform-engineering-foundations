@@ -1,0 +1,54 @@
+# Building block: Lambda function
+# Wraps the ACK Lambda Function resource. Developers pick a t-shirt size;
+# a CEL expression maps it to memory (mirrors Crossplane's map transform).
+# Owned by the compute team.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: lambda-function
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: LambdaFunction
+    spec:
+      name: string
+      s3Bucket: string
+      s3Key: string
+      handler: string | default="main.lambda_handler"
+      runtime: string | default="python3.12"
+      # small=256MB, medium=1024MB, large=2048MB, xlarge=4096MB
+      size: string | default="medium"
+      timeout: integer | default=30
+      roleArn: string
+      environmentVariables: "map[string]string"
+      environment: string | default="dev"
+    status:
+      functionArn: ${function.status.ackResourceMetadata.arn}
+      functionName: ${function.spec.name}
+
+  resources:
+    - id: function
+      readyWhen:
+        - ${function.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: lambda.services.k8s.aws/v1alpha1
+        kind: Function
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          packageType: Zip
+          runtime: ${schema.spec.runtime}
+          handler: ${schema.spec.handler}
+          timeout: ${schema.spec.timeout}
+          # T-shirt size to memory mapping via CEL conditional
+          memorySize: '${schema.spec.size == "small" ? 256 : schema.spec.size == "medium" ? 1024 : schema.spec.size == "large" ? 2048 : 4096}'
+          role: ${schema.spec.roleArn}
+          code:
+            s3Bucket: ${schema.spec.s3Bucket}
+            s3Key: ${schema.spec.s3Key}
+          environment:
+            variables: ${schema.spec.environmentVariables}
+          tags:
+            Environment: ${schema.spec.environment}
+            ManagedBy: KRO-ACK

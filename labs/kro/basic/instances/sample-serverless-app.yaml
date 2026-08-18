@@ -1,0 +1,23 @@
+apiVersion: kro.run/v1alpha1
+kind: ServerlessApp
+metadata:
+  name: my-serverless-app
+spec:
+  appName: my-serverless-app
+  region: us-east-1
+  environment: dev
+  vpcId: vpc-0c51c453190940bb9          # Replace with your VPC ID
+  subnetId1: subnet-05f6a445502b7a084   # Replace with your private subnet ID
+  subnetId2: subnet-0c071cdf12fbbb83c   # Replace with your private subnet ID
+
+  # RDS
+  databaseName: appdb
+  dbInstanceClass: db.t3.medium
+  dbEngineVersion: "17.4"
+  storageGB: 20
+
+  # Lambda
+  lambdaS3Bucket: my-serverless-app-ACCOUNT_ID   # Replace with your S3 bucket
+  lambdaS3Key: lambda/backend.zip
+  lambdaMemoryMB: 256
+  lambdaTimeoutSeconds: 30

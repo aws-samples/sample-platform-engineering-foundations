@@ -1,0 +1,243 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbucketlogging.bucket.platform.cloud
+  labels:
+    bucket.platform.cloud/type: bucketlogging
+    bucketlogging.bucket.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: bucket.platform.cloud/v1alpha1
+    kind: XBucketLogging
+  mode: Pipeline
+  pipeline:
+    - step: create-logging-bucket
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+        resources:
+          - name: logging-bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              metadata:
+                labels:
+                  resource: logging-bucket
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.bucketDomainName
+                toFieldPath: status.bucket.logging.bucketDomainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.bucket.logging.bucketName
+
+          - name: logging-bucket-blockpublicaccess
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                forProvider:
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: logging-bucket
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-public-access-block"
+
+          - name: logging-bucket-server-side-encryption
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: logging-bucket
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        - sseAlgorithm: AES256
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-server-side-encryption"
+
+          - name: logging-bucket-versioning
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: logging-bucket
+                  versioningConfiguration:
+                    - status: Disabled
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-versioning"
+
+          - name: logging-bucket-ownership
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketOwnershipControls
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: logging-bucket
+                  rule:
+                    - objectOwnership: BucketOwnerPreferred
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-ownership"
+
+          - name: logging-bucket-policy
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPolicy
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: logging-bucket
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-policy"
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |-
+                      {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                          {
+                              "Sid": "AllowCloudFrontAndS3PutObject",
+                              "Effect": "Allow",
+                              "Principal": {
+                                  "Service": "cloudfront.amazonaws.com"
+                              },
+                              "Action": "s3:PutObject",
+                              "Resource": "arn:aws:s3:::%[1]s/*"
+                          },
+                          {
+                              "Sid": "AllowS3PutObject",
+                              "Effect": "Allow",
+                              "Principal": {
+                                  "Service": "logging.s3.amazonaws.com"
+                              },
+                              "Action": "s3:PutObject",
+                              "Resource": "arn:aws:s3:::%[1]s/*"
+                          }
+                        ]
+                      }
+                  variables:
+                    - fromFieldPath: status.bucket.logging.bucketName
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.policy
+                type: CombineFromComposite
+
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready

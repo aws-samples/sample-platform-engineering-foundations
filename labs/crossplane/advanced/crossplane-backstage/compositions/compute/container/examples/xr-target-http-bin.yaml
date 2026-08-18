@@ -1,0 +1,63 @@
+apiVersion: compute.platform.cloud/v1alpha1
+kind: Container
+metadata:
+  name: back-004
+  namespace: default
+spec:
+  compositionSelector:
+    matchLabels:
+      compute.platform.cloud/type: container
+  parameters:
+    providerConfigRef:
+      name: kubernetes-psp01-us-east-1-123456789012
+    namespace: default
+    name: back-006
+    deletionPolicy: Delete
+    deployment:
+      replicas: 1
+      revisionHistoryLimit: 1
+      containers:
+        - name: app-backend-container
+          ports:
+            - containerPort: 80
+              protocol: TCP
+              name: api-svc
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+          image: kennethreitz/httpbin
+          env:
+            - name: HTTP_PORT
+              value: "80"
+    service:
+      name: app-backend-service
+      type: NodePort
+      ports:
+        - name: http
+          port: 80
+          targetPort: api-svc
+          protocol: TCP
+    ingress:
+      annotations:
+        alb.ingress.kubernetes.io/scheme: internet-facing
+        alb.ingress.kubernetes.io/target-type: ip
+        alb.ingress.kubernetes.io/group.name: default
+        alb.ingress.kubernetes.io/healthcheck-path: "/status/200"
+        alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+        alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+        alb.ingress.kubernetes.io/success-codes: "200"
+      ingressClassName: alb
+      rules:
+        - http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: app-backend-service
+                    port:
+                      number: 80

@@ -1,0 +1,23 @@
+apiVersion: apigateway.entrypoint.platform.cloud/v1alpha1
+kind: ApiRest
+metadata:
+  name: api-rtes-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      apigateway.entrypoint.platform.cloud/type: apirest
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-dataplane-psp-001-us-east-1-123456789012
+    name: api-rest-001
+    apiDescription: Amazon API Gateway of the type REST deployed from crossplane and EKS.
+    endpointType: REGIONAL
+    openApiSpecification: '{"openapi":"3.0.1","info":{"title":"Bank Cards","description":"BankCardsAPI.","version":"1.0"},"paths":{"/cards":{"get":{"operationId":"GETHTTP","parameters":[],"responses":{"200":{"description":"200response","headers":{"Access-Control-Allow-Origin":{"schema":{"type":"string"}}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Cards"}}}}},"x-amazon-apigateway-integration":{"responses":{"default":{"statusCode":"200"}},"uri":"http://${stageVariables.nlbDnsName}/cards","passthroughBehavior":"when_no_match","connectionType":"VPC_LINK","connectionId":"${stageVariables.vpcLinkId}","httpMethod":"GET","type":"http_proxy"}}},"/cards/{id}":{"get":{"operationId":"GetCard","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"number"}}],"responses":{"200":{"description":"200response","headers":{"Access-Control-Allow-Origin":{"schema":{"type":"string"}}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Card"}}}}},"x-amazon-apigateway-integration":{"responses":{"default":{"statusCode":"200"}},"uri":"http://${stageVariables.nlbDnsName}/cards/{id}","passthroughBehavior":"when_no_match","connectionType":"VPC_LINK","connectionId":"${stageVariables.vpcLinkId}","httpMethod":"GET","type":"http_proxy","requestParameters":{"integration.request.path.id":"method.request.path.id"}}}}},"x-amazon-apigateway-cors":{"allowOrigins":["*"],"allowMethods":["GET","OPTIONS","POST"],"allowHeaders":["x-amzm-header","x-apigateway-header","x-api-key","authorization","x-amz-date","content-type"]},"components":{"schemas":{"Cards":{"type":"array","items":{"$ref":"#/components/schemas/Card"}},"Card":{"type":"object","properties":{"id":{"type":"number"},"name":{"type":"string"}}},"Empty":{"type":"object"}}}}'
+    stageName: dev
+    logRetentionPeriod: 15
+    logLevel: INFO
+    tags:
+      app: "psp"

@@ -1,0 +1,28 @@
+apiVersion: database.platform.cloud/v1alpha1
+kind: Postgresql
+metadata:
+  name: postgresql-example-102
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      database.platform.cloud/type: postgresql
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    instanceClass: db.t4g.medium
+    storage: 20
+    backupRetentionPeriod: 14
+    username: adminuser
+    dbName: mydb102
+    port: 5432
+    secretNamespace: default
+    securityGroupIds:
+      - sg-006b710b0b4a8ff31
+    subnetIds:
+      - subnet-0dc64065f5ce09557
+      - subnet-029b78776dc7948e8
+    tags:
+      app: "psp"

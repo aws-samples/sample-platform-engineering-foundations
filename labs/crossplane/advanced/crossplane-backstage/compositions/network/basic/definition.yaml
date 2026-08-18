@@ -1,0 +1,105 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnetworkbasics.network.platform.cloud
+spec:
+  group: network.platform.cloud
+  names:
+    kind: XNetworkBasic
+    plural: xnetworkbasics
+  claimNames:
+    kind: NetworkBasic
+    plural: networkbasics
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the compute container.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this 
+                        managed resource is deleted - either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    region:
+                      type: string
+                      description: "AWS region where the EKS cluster is created."
+                      default: "us-east-1"
+                    vpcCidr:
+                      type: string
+                      description: "CIDR block for the VPC."
+                    publicSubnetA:
+                      type: object
+                      description: "CIDR block for the public subnet A."
+                      properties:
+                        cidrBlock:
+                          type: string
+                          description: "CIDR block for the public subnet A."
+                        availabilityZone:
+                          type: string
+                          description: "Availability zone for the public subnet A."
+                    publicSubnetB:
+                      type: object
+                      description: "CIDR block for the public subnet B."
+                      properties:
+                        cidrBlock:
+                          type: string
+                          description: "CIDR block for the public subnet B."
+                        availabilityZone:
+                          type: string
+                          description: "Availability zone for the public subnet B."
+                    privateSubnetA:
+                      type: object
+                      description: "CIDR block for the private subnet A."
+                      properties:
+                        cidrBlock:
+                          type: string
+                          description: "CIDR block for the private subnet A."
+                        availabilityZone:
+                          type: string
+                          description: "Availability zone for the private subnet A."
+                    privateSubnetB:
+                      type: object
+                      description: "CIDR block for the private subnet B."
+                      properties:
+                        cidrBlock:
+                          type: string
+                          description: "CIDR block for the private subnet B."
+                        availabilityZone:
+                          type: string
+                          description: "Availability zone for the private subnet B."
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - vpcCidr
+                    - publicSubnetA
+                    - publicSubnetB
+                    - privateSubnetA
+                    - privateSubnetB
+                    - tags
+              required:
+                - parameters
+          required:
+            - spec

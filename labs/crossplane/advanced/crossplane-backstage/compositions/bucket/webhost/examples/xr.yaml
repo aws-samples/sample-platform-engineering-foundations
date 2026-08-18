@@ -1,0 +1,41 @@
+apiVersion: bucket.platform.cloud/v1alpha1
+kind: BucketWebHost
+metadata:
+  name: bucket-wh-004
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      bucket.platform.cloud/type: webhost
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    name: bucket-wb-004-89as64
+    forceDestroy: true
+    versioningStatus: Enabled
+    corsRule:
+      - allowedHeaders:
+          - "*"
+        allowedMethods:
+          - GET
+          - HEAD
+        allowedOrigins:
+          - "*"
+        exposeHeaders: []
+        maxAgeSeconds: 3000
+    lifecycleConfiguration:
+      transitionStatus: Disabled
+      transitionPrefix: example-transition-prefix
+      nonCurrentVersionTransitionDays: 30
+      standardTransitionDays: 30
+      glacierTransitionDays: 60
+      expirationStatus: Disabled
+      expirationPrefix: example-expiration-prefix
+      nonCurrentVersionExpirationDays: 90
+      expirationDays: 90
+    configAllowAccess:
+      service: CLOUDFRONT
+    tags:
+      app: "psp"

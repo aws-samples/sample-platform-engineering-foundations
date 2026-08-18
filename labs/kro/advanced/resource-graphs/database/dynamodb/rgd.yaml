@@ -1,0 +1,44 @@
+# Building block: DynamoDB table
+# Wraps the ACK DynamoDB Table resource behind a small, focused API.
+# Owned by the database team.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: dynamodb-table
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: DynamoDBTable
+    spec:
+      name: string
+      hashKeyName: string | default="id"
+      hashKeyType: string | default="N"
+      environment: string | default="dev"
+    status:
+      # Exposed to consumers (including parent resource graphs)
+      tableArn: ${table.status.ackResourceMetadata.arn}
+      tableName: ${table.spec.tableName}
+
+  resources:
+    - id: table
+      readyWhen:
+        - ${table.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: dynamodb.services.k8s.aws/v1alpha1
+        kind: Table
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          tableName: ${schema.spec.name}
+          billingMode: PAY_PER_REQUEST
+          attributeDefinitions:
+            - attributeName: ${schema.spec.hashKeyName}
+              attributeType: ${schema.spec.hashKeyType}
+          keySchema:
+            - attributeName: ${schema.spec.hashKeyName}
+              keyType: HASH
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK

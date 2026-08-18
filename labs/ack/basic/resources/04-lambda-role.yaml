@@ -1,0 +1,27 @@
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Role
+metadata:
+  name: serverless-app-lambda-role
+  namespace: default
+spec:
+  name: serverless-app-lambda-role
+  assumeRolePolicyDocument: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "lambda.amazonaws.com"
+          },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+    }
+  policies:
+    - arn: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

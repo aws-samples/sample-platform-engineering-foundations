@@ -1,0 +1,159 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xspas.frontend.platform.cloud
+spec:
+  group: frontend.platform.cloud
+  names:
+    kind: XSpa
+    plural: xspas
+  claimNames:
+    kind: Spa
+    plural: spas
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Frontend configuration parameters.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted
+                        Either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    name:
+                      type: string
+                      description: >-
+                        Name of the spa and its resources.
+                    defaultRootObject:
+                      description: >-
+                        Object that you want CloudFront to return when an end user requests the root URL.
+                        default is index.html
+                      type: string
+                      default: index.html
+                    viewerCertificate:
+                      description: >-
+                        The SSL configuration for this distribution (maximum one).
+                        It is optional, if it is not filled, then the it will used the cloudfrontDefaultCertificate.
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          cloudfrontDefaultCertificate:
+                            description: >-
+                              true if you want viewers to use HTTPS to request your objects and you're using 
+                              the CloudFront domain name for your distribution. 
+                              Specify this, acm_certificate_arn, or iam_certificate_id.
+                            type: boolean
+                            default: true
+                          acmCertificateArn:
+                            description: >-
+                              ARN of the AWS Certificate Manager certificate that you wish to use with this distribution. 
+                              Specify this, cloudfront_default_certificate, or iam_certificate_id. 
+                              The ACM certificate must be in US-EAST-1.
+                            type: string
+                          sslSupportMethod:
+                            description: >-
+                              How you want CloudFront to serve HTTPS requests. One of vip, sni-only, or static-ip. 
+                              Required if you specify acm_certificate_arn or iam_certificate_id. 
+                              NOTE: vip causes CloudFront to use a dedicated IP address and may incur extra charges.
+                            type: string
+                      default:
+                        - cloudfrontDefaultCertificate: true
+                    aliases:
+                      description: >-
+                        Extra CNAMEs (alternate domain names), if any, for this distribution.
+                        It is optional. If it is not filled, then none domain will be associated.
+                      type: array
+                      items:
+                        type: string
+                      default: []
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - viewerCertificate
+                    - aliases
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                Object with relevant information resulting from 
+                this composition to be used by other compositions.
+              properties:
+                bucket:
+                  type: object
+                  description: >-
+                    Output from created bucket to host static files.
+                  properties:
+                    webhost:
+                      type: object
+                      description: >-
+                        Bucket with minimum settings to host a website.
+                      properties:
+                        name:
+                          description: >-
+                            Name of the bucket.
+                          type: string
+                        regionalDomainName:
+                          description: >-
+                            The bucket region-specific domain name. 
+                            The bucket domain name including the region name.
+                          type: string
+                cloudfront:
+                  description: >-
+                    Distribution is the Schema for the Distributions API.
+                    Provides a CloudFront web distribution resource.
+                  type: object
+                  properties:
+                    domainName:
+                      description: >-
+                        DNS domain name of either the S3 bucket, or web site of your custom origin.
+                      type: string
+                    oac:
+                      description: >-
+                        Provides a CloudFront origin access control.
+                      type: object
+                      properties:
+                        id:
+                          description: >-
+                            Identifier for the oac.
+                          type: string
+                    arn:
+                      description: >-
+                        ARN for the distribution. 
+                        For example: arn:aws:cloudfront::123456789012:distribution/EDFDVBD632BHDS5
+                        where 123456789012 is your AWS account ID.
+                      type: string
+                    loggingBucketDomainName:
+                      description: >-
+                        Domain Name of the bucket designated to store logs from cloudfront.
+                      type: string

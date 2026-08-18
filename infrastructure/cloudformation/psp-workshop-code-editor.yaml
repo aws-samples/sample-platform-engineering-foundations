@@ -1,0 +1,1321 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Platform Engineering Foundations - CodeOSS Editor (SSM State Manager + one-click IDE)'
+
+# =============================================================================
+# WHY THIS TEMPLATE WAS REWRITTEN
+# =============================================================================
+# The previous version used EC2 Image Builder to bake an AMI per account, and
+# password authentication in code-server itself. Two measured problems:
+#
+#   1. Time: baking the AMI took 15-30 min per provisioned account. With SSM State
+#      Manager the IDE is ready in ~6 min, because there is no intermediate AMI.
+#
+#   2. The login never worked as advertised. Two combined defects:
+#      - `{{resolve:secretsmanager:...}}` is NOT resolved inside `Outputs`, so the
+#        IdeUrl output delivered the literal string instead of the password;
+#      - `?tkn=<password>` does not exist in coder's code-server (it belongs to
+#        Microsoft's `code serve-web`), so the URL only led to the login form.
+#      On top of that the AMI enabled the service, which started on boot BEFORE
+#      UserData injected the password - code-server only reads the password at
+#      startup, so it rejected the correct password until someone restarted it.
+#
+# The pattern adopted here authenticates AT THE EDGE, not in the application:
+#   - code-server runs with `auth: none`
+#   - the instance security group only accepts the CloudFront origin prefix list
+#   - a CloudFront Function (viewer-request) exchanges `?tkn=<token>` for a
+#     Secure/HttpOnly cookie and returns 403 without a token
+# Since there is no network path to port 8080 that bypasses CloudFront,
+# `auth: none` is safe here - and the participant gets in with one click.
+#
+# Pattern validated in the eks-hybrid-nodes workshop (docs/code-server-provisioning.md
+# in that repository) and revalidated in this account. Artifacts are COPIED, not
+# shared between repositories: a common runtime would couple the fate of both
+# workshops.
+# =============================================================================
+
+Parameters:
+  WorkshopName:
+    Type: String
+    Default: 'psp'
+    Description: 'Name for the workshop resources'
+
+  EKSClusterName:
+    Type: String
+    Default: 'psp-cluster-1-platform'
+    Description: 'Cluster used as the default kubectl context in the IDE'
+
+  VPCId:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/workshop/psp/vpc-1-id'
+    Description: 'VPC ID from Parameter Store'
+
+  PublicSubnetId:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/workshop/psp/public-subnet-1a'
+    Description: 'Public Subnet ID from Parameter Store'
+
+  GitHubRepoUrl:
+    Type: String
+    Default: 'https://github.com/cnoe-io/reference-implementation-aws'
+    Description: 'GitHub repository URL for CNOE reference implementation'
+
+  InstanceType:
+    Type: String
+    Default: 't3.medium'
+    Description: 'EC2 instance type for the IDE'
+
+  RootVolumeSize:
+    Type: Number
+    Default: 60
+    Description: 'Root volume size in GB'
+
+  AtxCliVersion:
+    Type: String
+    Default: '3.9.0'
+    Description: >-
+      AWS Transform CLI (atx) version installed in the IDE, used by the optional
+      module 3.3.2 (legacy IaC migration). Pinned for the same reason as
+      code-server. Available versions:
+      https://transform-cli.awsstatic.com/index.json
+
+  CodeServerVersion:
+    Type: String
+    Default: '4.131.0'
+    Description: >-
+      code-server version installed via rpm. Pinned on purpose: a workshop must
+      produce the same environment months later. Check
+      https://github.com/coder/code-server/releases before bumping the version.
+
+  LatestAl2023Ami:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+    Description: 'Amazon Linux 2023 AMI (resolved via the public Parameter Store)'
+
+# AWS-managed prefix lists with the CloudFront origin-facing server IPs.
+# The IDs are REGION-SPECIFIC and follow no pattern: always confirm before
+# adding a region, never copy from another template.
+#
+#   aws ec2 describe-managed-prefix-lists --region <region> \
+#     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
+#     --query 'PrefixLists[0].PrefixListId' --output text
+#
+# Values verified with that query on 2026-08-02.
+Mappings:
+  CloudFrontPrefixList:
+    us-east-1:
+      PrefixList: pl-3b927c52
+    us-east-2:
+      PrefixList: pl-b6a144df
+    us-west-2:
+      PrefixList: pl-82a045eb
+    sa-east-1:
+      PrefixList: pl-5da64334
+    eu-west-1:
+      PrefixList: pl-4fa04526
+
+Resources:
+
+  # ------------------------------------------------------------ access token
+  # A custom resource generates the token because `{{resolve:secretsmanager:...}}`
+  # does not work in Outputs. It writes to Secrets Manager (for the instance to
+  # read) and returns the value as an attribute (for the output and the edge function).
+  IdeTokenFnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: manage-ide-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/${WorkshopName}/ide-password*'
+
+  IdeTokenFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt IdeTokenFnRole.Arn
+      Code:
+        ZipFile: |
+          # CloudFormation response written by hand with urllib, without depending
+          # on the auto-injected `cfnresponse` module - so the handler does not
+          # change behavior across runtimes.
+          import json
+          import urllib.request
+
+          def respond(event, ctx, status, data=None, no_echo=False, reason=None):
+              body = json.dumps({
+                  'Status': status,
+                  'Reason': reason or f'see log stream {ctx.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId') or ctx.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'NoEcho': no_echo,
+                  'Data': data or {},
+              }).encode()
+              req = urllib.request.Request(
+                  event['ResponseURL'], data=body, method='PUT',
+                  headers={'content-type': '', 'content-length': str(len(body))})
+              urllib.request.urlopen(req)
+
+          import boto3
+          import secrets
+          import string
+
+          def handler(event, ctx):
+              sm = boto3.client('secretsmanager')
+              name = event['ResourceProperties']['SecretName']
+              try:
+                  if event['RequestType'] == 'Delete':
+                      try:
+                          sm.delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
+                      except sm.exceptions.ResourceNotFoundException:
+                          pass
+                      return respond(event, ctx, 'SUCCESS')
+                  # Letters and digits only: the token travels in a query string and a cookie.
+                  alphabet = string.ascii_letters + string.digits
+                  token = ''.join(secrets.choice(alphabet) for _ in range(16))
+                  try:
+                      sm.create_secret(Name=name, SecretString=token)
+                  except sm.exceptions.ResourceExistsException:
+                      sm.put_secret_value(SecretId=name, SecretString=token)
+                  respond(event, ctx, 'SUCCESS',
+                          {'Password': token, 'SecretName': name}, no_echo=True)
+              except Exception as exc:
+                  respond(event, ctx, 'FAILED', reason=str(exc))
+
+  IdeToken:
+    Type: Custom::IdeToken
+    Properties:
+      ServiceToken: !GetAtt IdeTokenFn.Arn
+      SecretName: !Sub '/${WorkshopName}/ide-password'
+
+  # ------------------------------------------------------------ instance IAM
+  VSCodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-ide-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/${WorkshopName}/ide-password*'
+
+  VSCodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref VSCodeInstanceRole]
+
+  # ------------------------------------------------------------ provisioning
+  # SSM State Manager instead of EC2 Image Builder: there is no intermediate AMI,
+  # the execution history is visible per step in the SSM console, and the
+  # association reapplies the document periodically (all steps are idempotent),
+  # which self-heals an instance that has drifted.
+  IdeSetupDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: !Sub '${WorkshopName}-ide-setup'
+      DocumentType: Command
+      DocumentFormat: YAML
+      # A Content change creates a NEW VERSION instead of replacing the document.
+      # Without this, an SSM Document with a fixed name cannot be updated in place
+      # ("cannot update a stack when a custom-named resource requires replacing").
+      UpdateMethod: NewVersion
+      TargetType: /AWS::EC2::Instance
+      Content:
+        schemaVersion: '2.2'
+        description: Install and configure code-server + workshop tooling
+        parameters:
+          ClusterName:
+            type: String
+            default: psp-cluster-1-platform
+          CodeServerVersion:
+            type: String
+            default: 4.131.0
+          AtxCliVersion:
+            type: String
+            default: 3.9.0
+          GitHubRepoUrl:
+            type: String
+            default: 'https://github.com/cnoe-io/reference-implementation-aws'
+        mainSteps:
+          - action: aws:runShellScript
+            name: installTools
+            inputs:
+              timeoutSeconds: '900'
+              runCommand:
+                - |
+                  set -euxo pipefail
+                  export HOME=/root
+                  CODE_SERVER_VERSION="{{ CodeServerVersion }}"
+                  ATX_CLI_VERSION="{{ AtxCliVersion }}"
+                  # Idempotency guard: State Manager reapplies the document.
+                  if [ -f /opt/workshop/.tools-installed ]; then echo "tools already present, skipping"; exit 0; fi
+                  dnf update -y
+                  dnf install -y git jq unzip wget tar gzip bind-utils docker
+                  systemctl enable --now docker
+                  usermod -aG docker ec2-user
+                  # kubectl
+                  curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                  install -m 0755 kubectl /usr/local/bin/kubectl && rm -f kubectl
+                  # helm
+                  curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+                  # yq
+                  curl -sLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                  chmod +x /usr/local/bin/yq
+                  # k9s
+                  curl -sL https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz | tar xz -C /tmp k9s
+                  install -m 0755 /tmp/k9s /usr/local/bin/k9s
+                  # AWS Transform CLI (atx), used by the optional legacy-IaC-to-ACK+kro
+                  # migration module (3.3.2). Requires Node.js 22+.
+                  #
+                  # Version PINNED for the same reason as code-server: a workshop must
+                  # produce the same environment months later, and the installer accepts
+                  # the version as an argument. Index of available versions:
+                  # https://transform-cli.awsstatic.com/index.json
+                  #
+                  # The installer resolves $HOME and writes to ~/.local: the SSM shell
+                  # runs as root without HOME set, which is why it is exported here, and
+                  # the binary is linked into /usr/local/bin to be on everyone's PATH.
+                  dnf install -y nodejs22 nodejs22-npm || dnf install -y nodejs npm
+                  export HOME=/root
+                  curl -fsSL https://transform-cli.awsstatic.com/install.sh | bash -s "${ATX_CLI_VERSION}" || \
+                    echo "WARNING: atx installation failed - module 3.3.2 has an alternative path"
+                  if [ -x /root/.local/bin/atx ]; then
+                    ln -sf /root/.local/bin/atx /usr/local/bin/atx
+                    chmod -R a+rX /root/.local/share/atx /root/.local/bin/atx 2>/dev/null || true
+                    chmod a+x /root 2>/dev/null || true
+                    /usr/local/bin/atx --version || true
+                  fi
+                  # code-server: rpm with a pinned version. Deterministic, does not
+                  # depend on piping a remote script into the shell (the official
+                  # install.sh dereferences $HOME, which does not exist in the SSM
+                  # shell) and it is faster.
+                  curl -sLO "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-amd64.rpm"
+                  dnf install -y "./code-server-${CODE_SERVER_VERSION}-amd64.rpm"
+                  rm -f "code-server-${CODE_SERVER_VERSION}-amd64.rpm"
+                  test -x /usr/bin/code-server
+                  mkdir -p /opt/workshop && touch /opt/workshop/.tools-installed
+          - action: aws:runShellScript
+            name: configureIde
+            inputs:
+              timeoutSeconds: '300'
+              runCommand:
+                - |
+                  set -euxo pipefail
+                  install -d -o ec2-user -g ec2-user /home/ec2-user/environment /home/ec2-user/.config/code-server
+                  # auth: none - authentication happens at the edge (the CloudFront
+                  # Function validates the token and writes a cookie). Port 8080 only
+                  # accepts the CloudFront prefix list, so there is no path to the
+                  # IDE that bypasses that check. This is what enables the one-click
+                  # URL, with no password form.
+                  cat > /home/ec2-user/.config/code-server/config.yaml <<'EOF'
+                  bind-addr: 0.0.0.0:8080
+                  auth: none
+                  cert: false
+                  EOF
+                  chown -R ec2-user:ec2-user /home/ec2-user/.config
+                  cat > /etc/systemd/system/code-server@.service <<'EOF'
+                  [Unit]
+                  Description=code-server
+                  After=network-online.target
+                  Wants=network-online.target
+
+                  [Service]
+                  Type=simple
+                  User=%i
+                  WorkingDirectory=/home/%i/environment
+                  Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+                  ExecStart=/usr/bin/code-server --config /home/%i/.config/code-server/config.yaml /home/%i/environment
+                  Restart=always
+                  RestartSec=5
+
+                  [Install]
+                  WantedBy=multi-user.target
+                  EOF
+                  systemctl daemon-reload
+                  # explicit enable + restart: the configuration was just written
+                  # and code-server only reads it at startup.
+                  systemctl enable code-server@ec2-user
+                  systemctl restart code-server@ec2-user
+          - action: aws:runShellScript
+            name: configureIdeSettings
+            inputs:
+              timeoutSeconds: '120'
+              runCommand:
+                - |
+                  set -euxo pipefail
+                  # Initial editor preferences. The dark theme is what participants
+                  # expect and avoids the light-theme surprise at the start of the
+                  # workshop.
+                  #
+                  # `Visual Studio Dark` is the theme ID, not the displayed label
+                  # ("Dark (Visual Studio)"). Label and ID differ: using the label
+                  # here makes VS Code silently ignore the preference.
+                  # Other built-in IDs: Dark Modern, Dark+, Dark 2026.
+                  SETTINGS_DIR=/home/ec2-user/.local/share/code-server/User
+                  SETTINGS="${SETTINGS_DIR}/settings.json"
+                  # ONLY creates if absent. The State Manager association reapplies
+                  # this document every 30 minutes; overwriting here would undo any
+                  # tweak the participant made mid-workshop, including forcibly
+                  # switching the theme back.
+                  if [ ! -f "$SETTINGS" ]; then
+                    install -d -o ec2-user -g ec2-user "$SETTINGS_DIR"
+                    cat > "$SETTINGS" <<'EOF'
+                  {
+                    "workbench.colorTheme": "Visual Studio Dark",
+                    "workbench.startupEditor": "none",
+                    "editor.minimap.enabled": false,
+                    "terminal.integrated.fontSize": 13,
+                    "telemetry.telemetryLevel": "off",
+                    "update.mode": "none",
+                    "security.workspace.trust.enabled": false,
+                    "task.allowAutomaticTasks": "on"
+                  }
+                  EOF
+                    chown ec2-user:ec2-user "$SETTINGS"
+                    echo "settings.json created with Visual Studio Dark theme"
+                  else
+                    echo "settings.json already exists - preserving participant preferences"
+                  fi
+                  # Terminal open when the IDE loads: a task triggered on folderOpen
+                  # opens an interactive bash in the panel. It depends on TWO
+                  # settings above: `task.allowAutomaticTasks: on` (without it VS
+                  # Code asks before running the task) and
+                  # `security.workspace.trust.enabled: false` (an untrusted
+                  # workspace does not run tasks at all - and it also removes the
+                  # trust pop-up on first access). Same idempotency guard as
+                  # settings.json: ONLY creates if absent.
+                  TASKS_DIR=/home/ec2-user/environment/.vscode
+                  TASKS="${TASKS_DIR}/tasks.json"
+                  if [ ! -f "$TASKS" ]; then
+                    install -d -o ec2-user -g ec2-user "$TASKS_DIR"
+                    cat > "$TASKS" <<'EOF'
+                  {
+                    "version": "2.0.0",
+                    "tasks": [
+                      {
+                        "label": "Workshop Terminal",
+                        "type": "shell",
+                        "command": "/bin/bash",
+                        "presentation": { "reveal": "always", "focus": true, "panel": "new" },
+                        "runOptions": { "runOn": "folderOpen" },
+                        "problemMatcher": []
+                      }
+                    ]
+                  }
+                  EOF
+                    chown ec2-user:ec2-user "$TASKS"
+                    echo "tasks.json created - terminal opens automatically on folderOpen"
+                  else
+                    echo "tasks.json already exists - preserving"
+                  fi
+          - action: aws:runShellScript
+            name: workshopBootstrap
+            inputs:
+              timeoutSeconds: '2400'
+              runCommand:
+                - |
+                  # No -e: the clusters may still be creating, and that must NOT
+                  # fail the association (it reapplies on its own later).
+                  set -uxo pipefail
+                  REGION=$(curl -sH "X-aws-ec2-metadata-token: $(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')" http://169.254.169.254/latest/meta-data/placement/region)
+                  # kubeconfig for the three clusters, with a short alias per cluster.
+                  #
+                  # WHY WAIT: this instance is ready in ~6 min and the clusters take
+                  # ~13 min. A single update-kubeconfig attempt here ALWAYS fails,
+                  # and a `|| echo` would leave the participant with an empty
+                  # ~/.kube/config while the association reports Success - exactly
+                  # what happened before this fix. The symptom they see is a
+                  # `kubectl get nodes` answering "the server could not find the
+                  # requested resource", which hints nothing at the real cause.
+                  #
+                  # Wait for each cluster to reach ACTIVE before writing the context.
+                  # Cap of 20 min per cluster; the association reapplies every 30 min,
+                  # and since this step is idempotent a reapply fixes whatever is left.
+                  wait_for_cluster() {
+                    local name="$1" waited=0
+                    while [ "$waited" -lt 1200 ]; do
+                      status=$(aws eks describe-cluster --region "$REGION" --name "$name" \
+                        --query 'cluster.status' --output text 2>/dev/null || echo MISSING)
+                      [ "$status" = "ACTIVE" ] && return 0
+                      echo "waiting for $name (status: $status, ${waited}s)"
+                      sleep 30; waited=$((waited + 30))
+                    done
+                    echo "TIMEOUT: $name did not reach ACTIVE within 20 min"
+                    return 1
+                  }
+
+                  for pair in "1-platform:cluster-1" "2-cnoe-diy:cluster-2" "3-apps:cluster-3"; do
+                    suffix="${pair%%:*}"
+                    ctx="${pair##*:}"
+                    name="psp-cluster-${suffix}"
+                    if wait_for_cluster "$name"; then
+                      # Write to a TEMPORARY KUBECONFIG and promote with an atomic mv.
+                      # The State Manager association reapplies every 30 min, and
+                      # 'aws eks update-kubeconfig' read-modify-writes the file: if the
+                      # participant is running kubectl at that instant, the two writes
+                      # trample each other and the YAML comes out truncated mid-key
+                      # ("r-name" instead of "--cluster-name" - measured). The symptom
+                      # is devastating for someone mid-exercise: EVERY kubectl starts
+                      # failing with "could not find expected ':'" and nothing points
+                      # at the cause.
+                      sudo -u ec2-user env KUBECONFIG=/home/ec2-user/.kube/config.new \
+                        aws eks update-kubeconfig --region "$REGION" \
+                        --name "$name" --alias "$ctx"
+                    fi
+                  done
+
+                  # Default context points at the cluster given in the parameter.
+                  sudo -u ec2-user env KUBECONFIG=/home/ec2-user/.kube/config.new \
+                    aws eks update-kubeconfig --region "$REGION" \
+                    --name "{{ ClusterName }}" --alias "{{ ClusterName }}"
+                  sudo -u ec2-user env KUBECONFIG=/home/ec2-user/.kube/config.new \
+                    kubectl config use-context cluster-1 2>/dev/null || true
+                  # Atomic promotion: the participant never sees a half-written file.
+                  if sudo -u ec2-user env KUBECONFIG=/home/ec2-user/.kube/config.new \
+                       kubectl config get-contexts >/dev/null 2>&1; then
+                    sudo -u ec2-user mv -f /home/ec2-user/.kube/config.new \
+                      /home/ec2-user/.kube/config
+                  else
+                    echo "temporary kubeconfig invalid - keeping the previous one"
+                    sudo -u ec2-user rm -f /home/ec2-user/.kube/config.new
+                  fi
+
+                  # WARNING: an ACTIVE cluster answers update-kubeconfig, but that
+                  # does NOT mean this IDE can talk to it. Access depends on an EKS
+                  # Access Entry for the VSCodeInstanceRole, and the three
+                  # AccessEntry resources in this template reference the cluster by
+                  # NAME, not by !Ref - CloudFormation does not know they depend on
+                  # the clusters and guarantees no ordering. It works today because
+                  # the clusters reach ACTIVE before CloudFormation gets to them,
+                  # which is ordering by luck, not a declared dependency.
+                  #
+                  # That is why the check here is for ACCESS, not configuration: a
+                  # real call to the cluster API. If it fails on authorization, the
+                  # access entry is created right here - idempotent, and it also
+                  # covers the case where the CloudFormation resource does not exist yet.
+                  INSTANCE_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text \
+                    | sed 's|:sts:|:iam:|; s|assumed-role/|role/|; s|/[^/]*$||')
+                  echo "this instance's role: $INSTANCE_ROLE_ARN"
+
+                  for ctx in cluster-1 cluster-2 cluster-3; do
+                    case "$ctx" in
+                      cluster-1) CL=psp-cluster-1-platform ;;
+                      cluster-2) CL=psp-cluster-2-cnoe-diy ;;
+                      cluster-3) CL=psp-cluster-3-apps ;;
+                    esac
+                    ok=0
+                    for attempt in 1 2 3 4 5 6; do
+                      if sudo -u ec2-user kubectl --context "$ctx" get namespace kube-system >/dev/null 2>&1; then
+                        echo "$ctx: access confirmed"
+                        ok=1; break
+                      fi
+                      echo "$ctx: no access (attempt $attempt) - ensuring the access entry"
+                      aws eks create-access-entry --region "$REGION" --cluster-name "$CL" \
+                        --principal-arn "$INSTANCE_ROLE_ARN" --type STANDARD 2>/dev/null || true
+                      aws eks associate-access-policy --region "$REGION" --cluster-name "$CL" \
+                        --principal-arn "$INSTANCE_ROLE_ARN" \
+                        --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+                        --access-scope type=cluster 2>/dev/null || true
+                      sleep 20
+                    done
+                    [ "$ok" -eq 1 ] || echo "WARNING: $ctx still unreachable - the association reapplies in 30 min"
+                  done
+
+                  # Fail explicitly if the working cluster does not answer: a failed
+                  # association in the SSM history is worth more than a silent Success
+                  # the participant discovers via an error that explains nothing.
+                  if ! sudo -u ec2-user kubectl --context cluster-1 get namespace kube-system >/dev/null 2>&1; then
+                    echo "ERROR: cluster-1 unreachable after bootstrap"
+                    exit 1
+                  fi
+                  sudo -u ec2-user kubectl config get-contexts
+                  # Do NOT pre-clone the reference-implementation here: module 5 has
+                  # the participant clone FROM THE GITEA MIRROR (born patched in the
+                  # installGitea step). A pre-existing ~/environment/cnoe from raw
+                  # GitHub would make the participant's git clone fail with
+                  # "destination path already exists" - with unpatched upstream code.
+                  cat > /home/ec2-user/workshop-env.sh <<EOF
+                  export AWS_REGION=${REGION}
+                  export CLUSTER_PLATFORM=psp-cluster-1-platform
+                  export CLUSTER_CNOE=psp-cluster-2-cnoe-diy
+                  export CLUSTER_APPS=psp-cluster-3-apps
+                  EOF
+                  chown ec2-user:ec2-user /home/ec2-user/workshop-env.sh
+                  grep -q workshop-env.sh /home/ec2-user/.bashrc || \
+                    echo 'source /home/ec2-user/workshop-env.sh' >> /home/ec2-user/.bashrc
+          - action: aws:runShellScript
+            name: installGitea
+            inputs:
+              timeoutSeconds: '900'
+              runCommand:
+                - |
+                  # No -e on purpose: an unavailable Gitea must NOT fail the whole
+                  # association - module 5 has the manual install in an expand.
+                  set -uxo pipefail
+                  export HOME=/root
+                  REGION=$(curl -sH "X-aws-ec2-metadata-token: $(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')" http://169.254.169.254/latest/meta-data/placement/region)
+                  aws eks update-kubeconfig --region "$REGION" --name psp-cluster-2-cnoe-diy --alias c2 || exit 0
+                  # StorageClass: Auto Mode ships the EBS CSI driver but NO
+                  # StorageClass - without this the Gitea PVC stays Pending forever.
+                  cat <<'SCEOF' | kubectl --context c2 apply -f -
+                  apiVersion: storage.k8s.io/v1
+                  kind: StorageClass
+                  metadata:
+                    name: auto-ebs-sc
+                    annotations:
+                      storageclass.kubernetes.io/is-default-class: "true"
+                  provisioner: ebs.csi.eks.amazonaws.com
+                  volumeBindingMode: WaitForFirstConsumer
+                  parameters:
+                    type: gp3
+                    encrypted: "true"
+                  SCEOF
+                  # NodePool with a CPU floor. Auto Mode's native general-purpose
+                  # picks the CHEAPEST instance that satisfies the requests, and for
+                  # the CNOE stack that yields a c6a.large (2 vCPU) with ~84% of the
+                  # CPU reserved. The pods "fit" per the scheduler, so Karpenter does
+                  # not scale, but they start slow and the liveness probe kills them
+                  # before they turn Ready: argocd-server dies with exit 143 and
+                  # keycloak-postgresql thrashes, leaving 4 of the 12 Applications
+                  # Degraded forever. Requiring >= 4 vCPU fixes it because it changes
+                  # the chosen instance, without touching upstream packages' requests
+                  # or probes.
+                  cat <<'NPEOF' | kubectl --context c2 apply -f -
+                  apiVersion: karpenter.sh/v1
+                  kind: NodePool
+                  metadata:
+                    name: cnoe-platform
+                  spec:
+                    template:
+                      spec:
+                        nodeClassRef:
+                          group: eks.amazonaws.com
+                          kind: NodeClass
+                          name: default
+                        requirements:
+                          - key: karpenter.sh/capacity-type
+                            operator: In
+                            values: ["on-demand"]
+                          # CNOE's Backstage image (ghcr.io/cnoe-io/backstage-app) has a
+                          # single-architecture manifest (amd64). Without this constraint
+                          # Karpenter picks Graviton (t4g) on price and the container dies
+                          # with "exec /usr/local/bin/node: exec format error".
+                          - key: kubernetes.io/arch
+                            operator: In
+                            values: ["amd64"]
+                          - key: eks.amazonaws.com/instance-cpu
+                            operator: Gt
+                            values: ["3"]
+                          - key: eks.amazonaws.com/instance-memory
+                            operator: Gt
+                            values: ["7000"]
+                        expireAfter: 336h
+                    limits:
+                      cpu: "32"
+                    weight: 100
+                    disruption:
+                      consolidationPolicy: WhenEmptyOrUnderutilized
+                      consolidateAfter: 1m
+                  NPEOF
+                  export PATH=/usr/local/bin:$PATH
+                  helm repo add gitea-charts https://dl.gitea.com/charts/ 2>/dev/null || true
+                  helm repo update gitea-charts >/dev/null 2>&1 || true
+                  # SQLite + memory: a deliberate workshop simplification (1 pod,
+                  # 1 volume, zero databases to operate). Documented in module 5.
+                  helm --kube-context c2 upgrade --install gitea gitea-charts/gitea \
+                    --namespace gitea --create-namespace \
+                    --set gitea.admin.username=giteaAdmin \
+                    --set gitea.admin.password=workshop-gitea-2026 \
+                    --set service.http.type=ClusterIP \
+                    --set postgresql.enabled=false --set postgresql-ha.enabled=false \
+                    --set valkey.enabled=false --set valkey-cluster.enabled=false \
+                    --set gitea.config.database.DB_TYPE=sqlite3 \
+                    --set gitea.config.session.PROVIDER=memory \
+                    --set gitea.config.cache.ADAPTER=memory \
+                    --set gitea.config.queue.TYPE=level \
+                    --set persistence.enabled=true --set persistence.size=5Gi \
+                    --set persistence.storageClass=auto-ebs-sc \
+                    --wait --timeout 10m || { echo "gitea install failed - module 5 has the manual path"; exit 0; }
+                  # Org 'platform' + PUBLIC mirror of the reference-implementation.
+                  # Public is what removes the credential need in Argo CD (anonymous clone).
+                  kubectl --context c2 -n gitea port-forward svc/gitea-http 3000:3000 &
+                  PF=$!; sleep 5
+                  curl -s -X POST http://localhost:3000/api/v1/orgs \
+                    -H "Content-Type: application/json" -u giteaAdmin:workshop-gitea-2026 \
+                    -d '{"username":"platform"}' || true
+                  curl -s -X POST http://localhost:3000/api/v1/orgs/platform/repos \
+                    -H "Content-Type: application/json" -u giteaAdmin:workshop-gitea-2026 \
+                    -d '{"name":"reference-implementation-aws","private":false}' || true
+                  if [ ! -d /tmp/cnoe-mirror ]; then
+                    git clone -q "{{ GitHubRepoUrl }}" /tmp/cnoe-mirror || { kill $PF 2>/dev/null; exit 0; }
+                  fi
+                  cd /tmp/cnoe-mirror
+                  # The mirror is born PATCHED - fixes every participant would
+                  # otherwise hit, all found by running the install for real:
+                  # 1. cluster-secret-store.yaml has us-west-2 hardcoded (upstream);
+                  #    outside us-west-2 ExternalSecrets never finds the secret.
+                  sed -i "s/us-west-2/$REGION/g" packages/external-secrets/manifests/cluster-secret-store.yaml packages/crossplane-compositions/s3/general-purpose.yaml 2>/dev/null || true
+                  # 2. docker.io/bitnami lost the versioned tags (Broadcom,
+                  #    Aug/2025) - keycloak/postgresql in eternal ImagePullBackOff.
+                  #    The frozen archive lives in bitnamilegacy/, and the chart
+                  #    guard requires allowInsecureImages for a replaced registry.
+                  python3 - <<'PATCHEOF'
+                  import pathlib
+                  kv = pathlib.Path('packages/keycloak/values.yaml')
+                  t = kv.read_text()
+                  if 'bitnamilegacy' not in t:
+                      t = t.replace('adminRealm: "cnoe"', 'adminRealm: "cnoe"\n\nimage:\n  repository: bitnamilegacy/keycloak\n', 1)
+                      t = t.replace('global:\n  defaultStorageClass: gp3', 'global:\n  defaultStorageClass: gp3\n  security:\n    allowInsecureImages: true', 1)
+                      t = t.replace('postgresql:\n  enabled: true', 'postgresql:\n  enabled: true\n  image:\n    repository: bitnamilegacy/postgresql', 1)
+                      kv.write_text(t)
+                  # 3. {{ if .pathRouting }} is truthy for the string "false" in Go
+                  #    templates - every URL in the SSO job comes out wrong with
+                  #    domain routing. The repo itself uses "if eq" everywhere else.
+                  es = pathlib.Path('packages/keycloak/manifests/external-secrets.yaml')
+                  es.write_text(es.read_text().replace('{{ if .pathRouting }}', '{{ if eq (printf \\"%s\\" .pathRouting) \\"true\\" }}'))
+                  # 4. repo-server: default 1s probes + zero requests crash-loop the
+                  #    pod on the initial single node (53 restarts measured),
+                  #    before Auto Mode has any reason to scale.
+                  av = pathlib.Path('packages/argo-cd/values.yaml')
+                  t = av.read_text()
+                  if 'repoServer' not in t:
+                      t += '\nrepoServer:\n  livenessProbe:\n    timeoutSeconds: 30\n    periodSeconds: 30\n    failureThreshold: 5\n  readinessProbe:\n    timeoutSeconds: 30\n    periodSeconds: 30\n  resources:\n    requests:\n      cpu: 500m\n      memory: 512Mi\n'
+                      av.write_text(t)
+                  # 5. ESO's Password generators regenerate the password on every
+                  #    ExternalSecret re-apply (and the install + Argo CD apply the
+                  #    same manifest), but PostgreSQL keeps the first-boot password
+                  #    in the PVC - eternal auth failure in Keycloak (measured).
+                  #    Deterministic workshop passwords, same philosophy as Gitea.
+                  import re as _re
+                  t = es.read_text()
+                  if 'workshop-keycloak-db-2026' not in t:
+                      t = t.replace('"{{ .postgresPassword }}"', '"workshop-keycloak-db-2026"')
+                      t = t.replace('"{{ .keycloakAdminPassword }}"', '"workshop-keycloak-admin-2026"')
+                      t = t.replace('"{{ .keycloakUserPassword }}"', '"workshop-keycloak-user-2026"')
+                      t = _re.sub(r'  dataFrom:\n(?:  - sourceRef:\n(?:.*\n)*?    rewrite:\n    - transform:\n        template: "\w+"\n)+', '', t)
+                      es.write_text(t)
+                  # 6. Real requests for keycloak/postgres: without them the single
+                  #    node never gives Auto Mode a reason to scale, and the liveness
+                  #    pg_isready dies of starvation with a healthy database (measured:
+                  #    9 postgres restarts, 13 keycloak restarts).
+                  t = kv.read_text()
+                  if 'resources:' not in t:
+                      t = t.replace('adminRealm: "cnoe"', 'adminRealm: "cnoe"\n\nresources:\n  requests:\n    cpu: 500m\n    memory: 1Gi\n', 1)
+                      t = t.replace('postgresql:\n  enabled: true', 'postgresql:\n  enabled: true\n  primary:\n    resources:\n      requests:\n        cpu: 250m\n        memory: 256Mi\n    livenessProbe:\n      timeoutSeconds: 10\n    readinessProbe:\n      timeoutSeconds: 10', 1)
+                      kv.write_text(t)
+                  # 7. The SSO job downloads kubectl from a URL with a double slash
+                  #    (release/v1.28.3//bin) that answers 404 - curl saves the error
+                  #    XML as if it were the binary and the shell tries to execute XML
+                  #    ("syntax error near unexpected token '<'"). And the architecture
+                  #    is pinned to amd64, while the workshop NodePool picks Graviton:
+                  #    even with the right URL the binary would not run.
+                  jb = pathlib.Path('packages/keycloak/manifests/user-sso-config-job.yaml')
+                  t = jb.read_text()
+                  if 'dpkg --print-architecture' not in t:
+                      t = t.replace(
+                          'curl -sS -LO "https://dl.k8s.io/release/v1.28.3//bin/linux/amd64/kubectl"',
+                          'curl -sS -LO "https://dl.k8s.io/release/v1.28.3/bin/linux/$(dpkg --print-architecture)/kubectl"')
+                      jb.write_text(t)
+                  # 8. The Argo CD session call in the same job is wrong on two
+                  #    axes: it speaks http:// on port 443 (which expects TLS) and
+                  #    uses the /argocd/ path from path routing, which does not exist
+                  #    with domain routing. The token comes out empty, the
+                  #    keycloak-clients secret is born without it and Backstage/Argo
+                  #    Workflows stay Degraded. Verified by hand on the cluster: the
+                  #    same call on port 80 with no prefix returns {"token": "..."}.
+                  t = jb.read_text()
+                  if 'svc.cluster.local/api/v1/session' not in t:
+                      t = t.replace(
+                          'http://argocd-server.argocd.svc.cluster.local:443/argocd/api/v1/session',
+                          'http://argocd-server.argocd.svc.cluster.local/api/v1/session')
+                      jb.write_text(t)
+                  # 9. Patch 2 (bitnamilegacy) only covered keycloak/values.yaml,
+                  #    but Backstage brings its OWN postgresql as a chart dependency,
+                  #    with the same tag pulled from Docker Hub. Without this,
+                  #    backstage-postgresql-0 stays in eternal ImagePullBackOff
+                  #    (measured: docker.io/bitnami/postgresql:15.4.0-debian-11-r10
+                  #    answers 404; the identical tag exists in bitnamilegacy).
+                  bv = pathlib.Path('packages/backstage/values.yaml')
+                  t = bv.read_text()
+                  if 'bitnamilegacy' not in t:
+                      t = t.replace('postgresql:\n  enabled: true',
+                                    'postgresql:\n  enabled: true\n  image:\n    repository: bitnamilegacy/postgresql', 1)
+                      t += '\nglobal:\n  security:\n    allowInsecureImages: true\n'
+                      bv.write_text(t)
+                  # 10. The chart probes kill Backstage IN THE MIDDLE of the knex
+                  #     migration (30s startup, 1s timeout); the lock stays held and
+                  #     every subsequent boot dies with MigrationLocked. 5-minute window.
+                  t = bv.read_text()
+                  if 'startupProbe' not in t:
+                      t = t.replace('backstage:\n  replicas: 1',
+                          'backstage:\n  replicas: 1\n'
+                          '  startupProbe:\n    httpGet:\n      path: /.backstage/health/v1/liveness\n      port: 7007\n'
+                          '    periodSeconds: 10\n    failureThreshold: 30\n    timeoutSeconds: 5\n'
+                          '  livenessProbe:\n    httpGet:\n      path: /.backstage/health/v1/liveness\n      port: 7007\n'
+                          '    periodSeconds: 20\n    timeoutSeconds: 5\n    failureThreshold: 5\n'
+                          '  readinessProbe:\n    httpGet:\n      path: /.backstage/health/v1/readiness\n      port: 7007\n'
+                          '    periodSeconds: 15\n    timeoutSeconds: 5\n'
+                          '  resources:\n    requests:\n      cpu: 500m\n      memory: 1Gi', 1)
+                      bv.write_text(t)
+                  # 13b. The ALB cert is self-signed (ACME refuses *.elb.amazonaws.com);
+                  #      without this the OIDC discovery kills the boot mid-migration.
+                  t = bv.read_text()
+                  if 'NODE_TLS_REJECT_UNAUTHORIZED' not in t:
+                      t = t.replace('  extraEnvVarsSecrets:\n    - backstage-env-vars',
+                          '  extraEnvVars:\n    - name: NODE_TLS_REJECT_UNAUTHORIZED\n      value: "0"\n'
+                          '  extraEnvVarsSecrets:\n    - backstage-env-vars', 1)
+                      bv.write_text(t)
+                  # 14. The UrlReader denies hosts outside the allow-list (NotAllowedError) -
+                  #     and the templates' catalog location points at the in-cluster Gitea.
+                  t = bv.read_text()
+                  if 'reading:' not in t:
+                      t = t.replace('\n    backend:\n',
+                          '\n    backend:\n      reading:\n        allow:\n'
+                          '          - host: gitea-http.gitea.svc.cluster.local:3000\n', 1)
+                      bv.write_text(t)
+                  # 16. publish:gitea needs a credential and an explicit http baseUrl
+                  #     (without baseUrl the client attempts TLS against the http
+                  #     Gitea: "wrong version number").
+                  t = bv.read_text()
+                  if 'gitea:' not in t.split('integrations:')[-1][:200]:
+                      t = t.replace('    integrations:',
+                          '    integrations:\n      gitea:\n'
+                          '        - host: gitea-http.gitea.svc.cluster.local:3000\n'
+                          '          baseUrl: http://gitea-http.gitea.svc.cluster.local:3000\n'
+                          '          username: giteaAdmin\n          password: workshop-gitea-2026', 1)
+                      bv.write_text(t)
+                  # 11. Let's Encrypt refuses *.elb.amazonaws.com ("rejectedIdentifier,
+                  #     forbidden by policy") - with path routing the default-cert never
+                  #     issues and keycloak/backstage/argo stay Degraded. Self-signed.
+                  cm = pathlib.Path('packages/cert-manager/values.yaml')
+                  t = cm.read_text()
+                  if 'selfSigned: {}' not in t:
+                      t = t.replace('  - |\n    {{ if eq .Values.global.pathRouting "true"}}',
+                          '  - |\n    apiVersion: cert-manager.io/v1\n    kind: ClusterIssuer\n'
+                          '    metadata:\n      name: selfsigned\n'
+                          '      annotations:\n        argocd.argoproj.io/sync-wave: "0"\n'
+                          '    spec:\n      selfSigned: {}\n'
+                          '  - |\n    {{ if eq .Values.global.pathRouting "true"}}', 1)
+                      t = t.replace('      issuerRef:\n        name: letsencrypt-prod\n        kind: ClusterIssuer\n      dnsNames:\n      - {{ .Values.global.domainName }}',
+                          '      issuerRef:\n        name: selfsigned\n        kind: ClusterIssuer\n'
+                          '      commonName: {{ .Values.global.domainName }}\n      dnsNames:\n      - {{ .Values.global.domainName }}', 1)
+                      cm.write_text(t)
+                  # 12. The Argo CD session path depends on the routing (path routing
+                  #     uses rootpath /argocd); and the wrong path returns "404 page not
+                  #     found" which, with set -e -o pipefail, kills the script at the jq
+                  #     before the second candidate. Tolerant loop.
+                  t = jb.read_text()
+                  if 'SESSION_RESPONSE' not in t:
+                      import re as _re2
+                      t = _re2.sub(
+                          r'ARGOCD_SESSION_TOKEN=\$\(curl[^\n]*session[^\n]*\)',
+                          'for SESSION_PATH in /api/v1/session /argocd/api/v1/session; do\n'
+                          '                SESSION_RESPONSE=$(curl -k -sS "http://argocd-server.argocd.svc.cluster.local${SESSION_PATH}" -H \'Content-Type: application/json\' -d "{\\"username\\":\\"admin\\",\\"password\\":\\"${ARGOCD_PASSWORD}\\"}" || true)\n'
+                          '                ARGOCD_SESSION_TOKEN=$(printf \'%s\' "$SESSION_RESPONSE" | jq -r \'.token // empty\' 2>/dev/null || true)\n'
+                          '                [ -n "$ARGOCD_SESSION_TOKEN" ] && break\n'
+                          '              done', t, count=1)
+                      jb.write_text(t)
+                  # 13a. argo-workflows also does OIDC discovery against the ALB's
+                  #      self-signed cert.
+                  aw = pathlib.Path('packages/argo-workflows/values.yaml')
+                  t = aw.read_text()
+                  if 'insecureSkipVerify' not in t and 'sso:' in t:
+                      t = t.replace('sso:', 'sso:\n      insecureSkipVerify: true', 1)
+                      aw.write_text(t)
+                  # 15. The generated catalog location uses /blob/<rev>/ (an HTML page)
+                  #     and the parse dies with YAMLParseError; the raw endpoint serves
+                  #     the file. trimSuffix and not replace: ".gitea" also contains ".git".
+                  av2 = pathlib.Path('packages/addons/values.yaml')
+                  t = av2.read_text()
+                  old15 = "target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/templates/backstage/catalog-info.yaml'"
+                  if old15 in t:
+                      t = t.replace(old15, "target: '{{ trimSuffix \".git\" .metadata.annotations.addons_repo_url }}/raw/branch/main/templates/backstage/catalog-info.yaml'", 1)
+                      av2.write_text(t)
+                  # 16b. Upstream templates pin cnoe.localtest.me:8443 (local
+                  #      idpbuilder) - every run fails at publish. Point at the
+                  #      workshop Gitea, org platform (a plain user 404s on the org API).
+                  tb = pathlib.Path('templates/backstage/basic/template.yaml')
+                  if tb.exists():
+                      t = tb.read_text()
+                      t = t.replace('repoUrl: cnoe.localtest.me:8443/gitea?repo=${{parameters.name}}',
+                                    'repoUrl: gitea-http.gitea.svc.cluster.local:3000?owner=platform&repo=${{parameters.name}}')
+                      t = t.replace('repoUrl: https://cnoe.localtest.me:8443/gitea/giteaAdmin/${{parameters.name}}',
+                                    'repoUrl: http://gitea-http.gitea.svc.cluster.local:3000/platform/${{parameters.name}}')
+                      tb.write_text(t)
+                  PATCHEOF
+                  git config user.email workshop@aws && git config user.name "PSP Workshop"
+                  git add -A && git commit -q -m "fix: workshop patches - region, bitnamilegacy images, pathRouting eq, repo-server probes" || true
+                  git push -q http://giteaAdmin:workshop-gitea-2026@localhost:3000/platform/reference-implementation-aws.git HEAD:main 2>/dev/null || true
+                  kill $PF 2>/dev/null || true
+                  echo "gitea ready: org platform, public mirror of the reference-implementation"
+
+                  # ---- INGRESS_DNS infra (validated in event fb1c47c8) ----
+                  # The URLs CNOE generates in path routing are https://<ALB>/...;
+                  # without these 3 pieces the domain serves nothing and every OIDC
+                  # consumer (Backstage, Argo Workflows) dies at boot.
+                  ALB_ARN=$(aws elbv2 describe-load-balancers --region "$REGION" \
+                    --query "LoadBalancers[?contains(DNSName, 'psp-alb')].LoadBalancerArn" --output text)
+                  ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns "$ALB_ARN" --region "$REGION" \
+                    --query 'LoadBalancers[0].DNSName' --output text)
+                  TG_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --region "$REGION" \
+                    --query 'Listeners[?Port==`80`].DefaultActions[0].TargetGroupArn | [0]' --output text)
+                  # 1) HTTPS:443 listener with a self-signed cert (ACME refuses
+                  #    *.elb.amazonaws.com, and an own cert is enough for the lab).
+                  HAS443=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --region "$REGION" \
+                    --query 'length(Listeners[?Port==`443`])' --output text)
+                  if [ "$HAS443" = "0" ]; then
+                    openssl req -x509 -newkey rsa:2048 -keyout /tmp/alb.key -out /tmp/alb.crt \
+                      -days 90 -nodes -subj "/CN=${ALB_DNS}" -addext "subjectAltName=DNS:${ALB_DNS}" 2>/dev/null
+                    CERT_ARN=$(aws acm import-certificate --certificate fileb:///tmp/alb.crt \
+                      --private-key fileb:///tmp/alb.key --region "$REGION" --query CertificateArn --output text)
+                    aws elbv2 create-listener --load-balancer-arn "$ALB_ARN" --protocol HTTPS --port 443 \
+                      --certificates CertificateArn="$CERT_ARN" \
+                      --default-actions Type=forward,TargetGroupArn="$TG_ARN" --region "$REGION" >/dev/null
+                    rm -f /tmp/alb.key /tmp/alb.crt
+                    echo "listener 443 created"
+                  fi
+                  # 2) the cluster 2 SG must accept the ALB health check
+                  #    (VPC1 -> VPC2 via peering).
+                  SG2=$(aws eks describe-cluster --name psp-cluster-2-cnoe-diy --region "$REGION" \
+                    --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+                  aws ec2 authorize-security-group-ingress --group-id "$SG2" --protocol tcp --port 80 \
+                    --cidr 10.0.0.0/16 --region "$REGION" 2>/dev/null || true
+                  # 3) cluster 2's nginx registers in the ALB TG. AZ=all because the
+                  #    IP belongs to another VPC (peered). The matcher accepts nginx's
+                  #    308 and the health check hits /healthz.
+                  aws elbv2 modify-target-group --target-group-arn "$TG_ARN" \
+                    --matcher HttpCode=200-399 --health-check-path /healthz --region "$REGION" >/dev/null
+                  cat <<TGBEOF | kubectl apply -f - >/dev/null
+                  apiVersion: eks.amazonaws.com/v1
+                  kind: TargetGroupBinding
+                  metadata:
+                    name: nginx-alb
+                    namespace: ingress-nginx
+                  spec:
+                    targetType: ip
+                    serviceRef:
+                      name: ingress-nginx-controller
+                      port: 80
+                    targetGroupARN: ${TG_ARN}
+                  TGBEOF
+                  echo "ingress infra ready: 443 + SG + TargetGroupBinding"
+                  # 4) nginx must honor the ALB's X-Forwarded-Proto, otherwise it
+                  #    answers 308 in a loop for all https terminated at the ALB.
+                  kubectl patch cm ingress-nginx-controller -n ingress-nginx --type merge \
+                    -p '{"data":{"use-forwarded-headers":"true"}}' 2>/dev/null || true
+
+  # The installGitea step runs AFTER workshopBootstrap (which already waited for
+  # the clusters to reach ACTIVE and validated kubectl access), so cluster 2 is
+  # guaranteed reachable here.
+  #
+  # Why pre-install: Gitea is infrastructure prerequisite for module 5, not its
+  # subject - the subject is CNOE. Installing it used to consume ~10 min of helm
+  # install + the participant discovering Auto Mode ships no StorageClass.
+  # The module content VERIFIES the installation and explains what was pre-installed.
+  #
+  # All sub-steps are idempotent (kubectl apply, helm upgrade --install, org/repo
+  # creation tolerates 409) - the association reapplies every 30 minutes.
+  # Bucket for the full SSM command output: inline output is truncated at ~2.5KB,
+  # which hides the real error when a step fails.
+  SsmOutputBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: >-
+              Access logging on a bucket whose only content is SSM command output
+              would mean logging reads of logs, in an account that exists for four
+              hours. The bucket blocks all public access, expires objects after 7
+              days, and is emptied and deleted with the stack.
+    Properties:
+      BucketName: !Sub '${WorkshopName}-ide-ssm-output-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-logs
+            Status: Enabled
+            ExpirationInDays: 7
+      Tags:
+        - Key: auto-delete
+          Value: 'no'
+
+  # An S3 bucket with objects CANNOT be deleted, and this one receives SSM logs
+  # continuously (the association reapplies every 30 min) - in practice it is
+  # NEVER empty at delete time, and the stack hangs in DELETE_FAILED (observed:
+  # "The bucket you tried to delete is not empty"). The ECR EmptyOnDelete
+  # equivalent does not exist for S3, so a custom resource empties the bucket on
+  # Delete. Retain would not solve it: the bucket has a FIXED name per
+  # account/region, and a re-deploy would collide with the retained orphan.
+  BucketCleanupFnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: empty-ssm-output-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt SsmOutputBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource: !Sub '${SsmOutputBucket.Arn}/*'
+
+  BucketCleanupFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 300
+      Role: !GetAtt BucketCleanupFnRole.Arn
+      Code:
+        ZipFile: |
+          # Same pattern as IdeTokenFn: CloudFormation response written by hand,
+          # without depending on the runtime-injected cfnresponse module.
+          import json
+          import urllib.request
+
+          def respond(event, ctx, status, reason=None):
+              body = json.dumps({
+                  'Status': status,
+                  'Reason': reason or f'see log stream {ctx.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId') or ctx.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': {},
+              }).encode()
+              req = urllib.request.Request(
+                  event['ResponseURL'], data=body, method='PUT',
+                  headers={'content-type': '', 'content-length': str(len(body))})
+              urllib.request.urlopen(req)
+
+          import boto3
+
+          def handler(event, ctx):
+              try:
+                  # Only Delete acts; Create/Update are no-ops.
+                  if event['RequestType'] == 'Delete':
+                      bucket = event['ResourceProperties']['BucketName']
+                      s3 = boto3.resource('s3').Bucket(bucket)
+                      # batch delete() via the collection covers objects and delete markers
+                      s3.objects.all().delete()
+                      s3.object_versions.all().delete()
+                  respond(event, ctx, 'SUCCESS')
+              except Exception as exc:
+                  # A failed cleanup must NOT hold the stack forever: better to
+                  # report success with the error in the log than to swap one
+                  # DELETE_FAILED for another. The worst case falls back to the
+                  # current state (non-empty bucket), never worse than it.
+                  print('cleanup failed: %s' % exc)
+                  respond(event, ctx, 'SUCCESS', reason=str(exc))
+
+  # CloudFormation's delete order is the REVERSE of the dependencies: this
+  # resource depends on the bucket, so it is deleted BEFORE it - emptying it in
+  # time. Explicit DependsOn on the role so the role delete does not race ahead
+  # of the Lambda execution.
+  SsmOutputBucketCleanup:
+    Type: Custom::BucketCleanup
+    DependsOn: BucketCleanupFnRole
+    Properties:
+      ServiceToken: !GetAtt BucketCleanupFn.Arn
+      BucketName: !Ref SsmOutputBucket
+
+  IdeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'code-server origin - CloudFront only'
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourcePrefixListId: !FindInMap [CloudFrontPrefixList, !Ref 'AWS::Region', PrefixList]
+          Description: 'CloudFront origin-facing servers only'
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: 'Open egress: the instance installs tooling and calls AWS APIs'
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-ide-sg'
+        - Key: auto-delete
+          Value: 'no'
+
+  VSCodeEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAl2023Ami
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref VSCodeInstanceProfile
+      SubnetId: !Ref PublicSubnetId
+      SecurityGroupIds: [!Ref IdeSecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
+            Encrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-code-editor'
+        - Key: auto-delete
+          Value: 'no'
+
+  IdeSetupAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      Name: !Ref IdeSetupDocument
+      AssociationName: !Sub '${WorkshopName}-ide-setup'
+      Targets:
+        - Key: InstanceIds
+          Values: [!Ref VSCodeEC2]
+      Parameters:
+        ClusterName: [!Ref EKSClusterName]
+        CodeServerVersion: [!Ref CodeServerVersion]
+        AtxCliVersion: [!Ref AtxCliVersion]
+        GitHubRepoUrl: [!Ref GitHubRepoUrl]
+      # Reapplies periodically: the steps are idempotent, so an instance that
+      # drifted returns to the expected state without intervention.
+      ScheduleExpression: 'rate(30 minutes)'
+      MaxConcurrency: '1'
+      MaxErrors: '1'
+      OutputLocation:
+        S3Location:
+          OutputS3BucketName: !Ref SsmOutputBucket
+          OutputS3KeyPrefix: ide-setup
+
+  # --------------------------------------------------- EKS cluster access
+  VSCodeEKSAccessEntryCluster1:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Sub '${WorkshopName}-cluster-1-platform'
+      PrincipalArn: !GetAtt VSCodeInstanceRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+
+  VSCodeEKSAccessEntryCluster2:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Sub '${WorkshopName}-cluster-2-cnoe-diy'
+      PrincipalArn: !GetAtt VSCodeInstanceRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+
+  VSCodeEKSAccessEntryCluster3:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Sub '${WorkshopName}-cluster-3-apps'
+      PrincipalArn: !GetAtt VSCodeInstanceRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+
+  # ------------------------------------------------------------ edge / access
+  # Exchanges the token for a cookie and blocks anyone presenting neither. This
+  # is what replaces code-server's password form.
+  EdgeAuthFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${WorkshopName}-ide-edge-auth'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: 'Token-to-cookie exchange for the workshop IDE'
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub
+        - |
+          var TOKEN = '${Token}';
+          var COOKIE = 'ws-ide-auth';
+          function handler(event) {
+            var req = event.request;
+            var qs = req.querystring || {};
+            var cookies = req.cookies || {};
+            // already authenticated in this session
+            if (cookies[COOKIE] && cookies[COOKIE].value === TOKEN) {
+              return req;
+            }
+            // first access carrying the token: set the cookie and redirect to a
+            // clean URL, so the token does not stay in the browser bar
+            if (qs.tkn && qs.tkn.value === TOKEN) {
+              return {
+                statusCode: 302,
+                statusDescription: 'Found',
+                headers: { 'location': { value: '/' } },
+                cookies: {
+                  'ws-ide-auth': {
+                    value: TOKEN,
+                    attributes: 'Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=43200'
+                  }
+                }
+              };
+            }
+            return {
+              statusCode: 403,
+              statusDescription: 'Forbidden',
+              headers: { 'content-type': { value: 'text/html' } },
+              body: '<h2>PSP Workshop IDE</h2><p>Open the IdeUrl from your event dashboard - it carries your access token.</p>'
+            };
+          }
+        - Token: !GetAtt IdeToken.Password
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        Comment: !Sub '${WorkshopName} code-server IDE'
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub '${AWS::StackName}-ide'
+          ViewerProtocolPolicy: redirect-to-https
+          # CachingDisabled + AllViewer for the DYNAMIC path: the IDE holds a
+          # WebSocket and a session, none of which can be cached. Static assets
+          # have their own behavior below - without it, the whole IDE falls under
+          # this policy and every open re-downloads ~18 MB of bundle from the EC2.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt EdgeAuthFunction.FunctionMetadata.FunctionARN
+        # ------------------------------------------------------------------
+        # code-server static assets: cacheable, and the difference is huge
+        # ------------------------------------------------------------------
+        # The code-server workbench weighs ~18 MB (workbench.js alone is 17.6 MB
+        # measured on version 4.131.0) and is served from an IMMUTABLE path with
+        # the version hash embedded:
+        #
+        #   /stable-<commit-sha>/static/out/vs/code/browser/workbench/workbench.js
+        #
+        # Under the default policy (CachingDisabled) every IDE open pulls that
+        # whole bundle from a t3.medium through CloudFront with no cache. The
+        # effect observed in the first test event was an IDE that opens and only
+        # shows the automatic terminal 30 to 40 seconds later - the `folderOpen`
+        # task depends on the extension host, which depends on the workbench
+        # having loaded.
+        #
+        # Since the path carries the version hash, caching is safe: a code-server
+        # update changes the path and invalidates by itself.
+        CacheBehaviors:
+          - PathPattern: '/stable-*/static/*'
+            TargetOriginId: !Sub '${AWS::StackName}-ide'
+            ViewerProtocolPolicy: redirect-to-https
+            # CachingOptimized
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            # The edge function still applies: without the cookie, not even assets are served.
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt EdgeAuthFunction.FunctionMetadata.FunctionARN
+          - PathPattern: '/_static/*'
+            TargetOriginId: !Sub '${AWS::StackName}-ide'
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt EdgeAuthFunction.FunctionMetadata.FunctionARN
+        Origins:
+          - Id: !Sub '${AWS::StackName}-ide'
+            DomainName: !GetAtt VSCodeEC2.PublicDnsName
+            CustomOriginConfig:
+              HTTPPort: 8080
+              OriginProtocolPolicy: http-only
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+      Tags:
+        - Key: auto-delete
+          Value: 'no'
+
+  # Publishes the IDE domain so the labs can build URLs for locally exposed
+  # services without depending on the stack name.
+  IdeDomainParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/ide-domain'
+      Type: String
+      Value: !GetAtt CloudFrontDistribution.DomainName
+
+Outputs:
+  IdeUrl:
+    Description: 'One-click URL to your browser IDE - opens already authenticated'
+    Value: !Sub
+      - 'https://${Domain}/?tkn=${Token}'
+      - Domain: !GetAtt CloudFrontDistribution.DomainName
+        Token: !GetAtt IdeToken.Password
+    Export:
+      Name: !Sub '${AWS::StackName}-CodeEditorURL'
+
+  IdeDomain:
+    Description: 'CloudFront domain of the IDE'
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  VSCodeEC2Id:
+    Description: 'IDE EC2 instance id (SSM Session Manager works for troubleshooting)'
+    Value: !Ref VSCodeEC2
+
+  SetupInstructions:
+    Description: 'Next steps'
+    Value: !Sub |
+      1. Open the IdeUrl above - it authenticates you automatically, no password to type.
+         If the browser asks for a password, read it from Secrets Manager:
+         aws secretsmanager get-secret-value --secret-id /${WorkshopName}/ide-password --query SecretString --output text
+      2. Open a terminal in the IDE (Terminal menu, or Ctrl+`).
+      3. kubectl contexts cluster-1 / cluster-2 / cluster-3 are pre-configured.
+      4. Per-step provisioning history: SSM console, association ${WorkshopName}-ide-setup.

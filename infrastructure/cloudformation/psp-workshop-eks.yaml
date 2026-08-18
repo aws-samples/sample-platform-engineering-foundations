@@ -1,0 +1,2011 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Platform Engineering Foundations - EKS Auto Mode + CodeOSS'
+
+Parameters:
+  WorkshopName:
+    Type: String
+    Default: 'psp'
+    Description: 'Name for the workshop resources'
+
+  GitHubRepoUrl:
+    Type: String
+    Default: 'https://github.com/cnoe-io/reference-implementation-aws'
+    Description: 'GitHub repository URL for CNOE reference implementation'
+
+  # ----- GenAI plugin parameters -----
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Default: dev
+    Description: >-
+      Deployment target environment. In dev, the stack also creates the custom
+      resources that tag provisioned resources and Karpenter NodeClasses, so a
+      long-lived sandbox account keeps its lifecycle metadata; in prod those are
+      skipped and a validator checks the requested Bedrock model against the
+      currently supported model list instead. AllowedValues makes an unknown
+      value fail at CREATE time with a message naming the rejected input, rather
+      than deploying a half-configured stack. Default is dev.
+
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    AllowedPattern: '^(us\.)?anthropic\.claude-(haiku-4-5|sonnet-4)-.*'
+    ConstraintDescription: >-
+      BedrockModelId must match the Haiku 4.5 OR Sonnet 4 family prefix, with an
+      optional `us.` cross-region inference-profile prefix. The pattern is
+      deliberately narrow: the agent prompt and token budget are tuned for these
+      two families, so an arbitrary model id would deploy but behave poorly.
+      Custom::SupportedListValidator additionally checks the id against the
+      currently supported model list (skipped when Environment=dev).
+    Description: >-
+      Bedrock model id used by the LangGraph_Agent and the Pre-warm Lambda.
+      Default is the Haiku 4.5 cross-region inference profile, chosen for latency
+      and cost during the lab; the supported fallback is the Sonnet 4 inference
+      profile (us.anthropic.claude-sonnet-4-20250514-v1:0) when answer quality
+      matters more than response time.
+
+  WorkshopAssetsBucket:
+    Type: String
+    MinLength: 3
+    Description: >-
+      Name of the S3 bucket holding the packaged Lambda zips (lambda/prewarm.zip
+      and lambda/supported-list-validator.zip). Create and populate it via
+      scripts/upload-backstage-genai-assets.sh BEFORE deploying this
+      stack, then pass the bucket name as a --parameter-overrides value. Kept as a
+      parameter (not a stack-created resource) so the code objects exist before
+      the Lambda resources are created - avoids the single-stack create ordering
+      problem while keeping every !Ref resolvable inside this template.
+
+  AssetsBucketPrefix:
+    Type: String
+    Default: ''
+    Description: >-
+      Prefix inside the assets bucket where the artifacts are published (Lambda
+      zips under <prefix>lambda/ and Backstage build files under
+      <prefix>backstage-genai/). In Workshop Studio this value comes from the
+      magic variable {{.AssetsBucketPrefix}} and ALREADY ENDS with '/'. For
+      manual deploys leave it empty, which is the layout produced by the
+      repository scripts.
+
+Conditions:
+  # Gate the environment-specific resources: the tagging custom resources exist
+  # only in dev, the supported-model validator only in prod.
+  IsProdEnvironment: !Equals [!Ref Environment, prod]
+
+# AWS managed prefix lists holding the IPs of the CloudFront origin-facing
+# servers. Used so that the portal ALB accepts traffic ONLY from CloudFront, and
+# never direct access over HTTP.
+#
+# The IDs are REGION SPECIFIC and follow no pattern: always confirm before adding
+# a new region, never copy from another template.
+#
+#   aws ec2 describe-managed-prefix-lists --region <region> \
+#     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
+#     --query 'PrefixLists[0].PrefixListId' --output text
+#
+# The values below were verified with that query on 2026-08-01. An invalid ID
+# breaks the security group creation and, with it, the whole stack.
+Mappings:
+  CloudFrontOriginPrefixList:
+    us-east-1:
+      PrefixList: pl-3b927c52
+    us-east-2:
+      PrefixList: pl-b6a144df
+    us-west-2:
+      PrefixList: pl-82a045eb
+    sa-east-1:
+      PrefixList: pl-5da64334
+    eu-west-1:
+      PrefixList: pl-4fa04526
+
+Resources:
+  # ========================================
+  # VPC 1 - EKS Capabilities Cluster
+  # ========================================
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-vpc-1-capabilities'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'EKS Capabilities Cluster'
+
+  # Internet Gateway
+  InternetGateway1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-igw-1'
+
+  InternetGatewayAttachment1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway1
+      VpcId: !Ref VPC1
+
+  # Public Subnets
+  PublicSubnet1A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-1a'
+        # Auto-discovery tag required by the EKS Auto Mode load balancing
+        # controller. Backstage is published through a Service of type
+        # LoadBalancer on the platform cluster; without this tag the Service
+        # stays pending forever with "unable to resolve at least one subnet".
+        - Key: kubernetes.io/role/elb
+          Value: '1'
+
+  PublicSubnet1B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-1b'
+        # Auto-discovery tag required by the EKS Auto Mode load balancing
+        # controller. Backstage is published through a Service of type
+        # LoadBalancer on the platform cluster; without this tag the Service
+        # stays pending forever with "unable to resolve at least one subnet".
+        - Key: kubernetes.io/role/elb
+          Value: '1'
+
+  # Private Subnets
+  PrivateSubnet1A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-1a'
+        # Equivalent of the tag above, for internal load balancers.
+        - Key: kubernetes.io/role/internal-elb
+          Value: '1'
+
+  PrivateSubnet1B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.12.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-1b'
+        # Equivalent of the tag above, for internal load balancers.
+        - Key: kubernetes.io/role/internal-elb
+          Value: '1'
+
+  # NAT Gateway
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment1
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-eip-1'
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1A
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-1'
+
+  # Route Tables
+  PublicRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-routes-1'
+
+  DefaultPublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment1
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway1
+
+  PublicSubnet1ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      SubnetId: !Ref PublicSubnet1A
+
+  PublicSubnet1BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      SubnetId: !Ref PublicSubnet1B
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-routes-1'
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1A
+
+  PrivateSubnet1BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1B
+
+  # ========================================
+  # VPC 2 - CNOE DIY Cluster
+  # ========================================
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-vpc-2-cnoe-diy'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'CNOE DIY Cluster'
+
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-igw-2'
+
+  InternetGatewayAttachment2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway2
+      VpcId: !Ref VPC2
+
+  PublicSubnet2A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.1.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-2a'
+
+  PublicSubnet2B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.1.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-2b'
+
+  PrivateSubnet2A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.1.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-2a'
+
+  PrivateSubnet2B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.1.12.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-2b'
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment2
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-eip-2'
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2A
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-2'
+
+  PublicRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-routes-2'
+
+  DefaultPublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment2
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway2
+
+  PublicSubnet2ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      SubnetId: !Ref PublicSubnet2A
+
+  PublicSubnet2BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      SubnetId: !Ref PublicSubnet2B
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-routes-2'
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  PrivateSubnet2ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2A
+
+  PrivateSubnet2BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2B
+
+  # ========================================
+  # VPC 3 - Apps Platform Cluster
+  # ========================================
+  VPC3:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-vpc-3-apps-platform'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'Apps Platform Cluster'
+
+  InternetGateway3:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-igw-3'
+
+  InternetGatewayAttachment3:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway3
+      VpcId: !Ref VPC3
+
+  PublicSubnet3A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.2.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-3a'
+
+  PublicSubnet3B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.2.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-subnet-3b'
+
+  PrivateSubnet3A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.2.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-3a'
+
+  PrivateSubnet3B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.2.12.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-subnet-3b'
+
+  NatGateway3EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment3
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-eip-3'
+
+  NatGateway3:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway3EIP.AllocationId
+      SubnetId: !Ref PublicSubnet3A
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-nat-3'
+
+  PublicRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC3
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-public-routes-3'
+
+  DefaultPublicRoute3:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment3
+    Properties:
+      RouteTableId: !Ref PublicRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway3
+
+  PublicSubnet3ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable3
+      SubnetId: !Ref PublicSubnet3A
+
+  PublicSubnet3BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable3
+      SubnetId: !Ref PublicSubnet3B
+
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC3
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-private-routes-3'
+
+  DefaultPrivateRoute3:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway3
+
+  PrivateSubnet3ARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref PrivateSubnet3A
+
+  PrivateSubnet3BRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref PrivateSubnet3B
+
+  # ========================================
+  # IAM Roles (Shared across all clusters)
+  # ========================================
+  # EKS Cluster Service Role
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - eks.amazonaws.com
+                - pods.eks.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+              - sts:TagSession
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSComputePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSBlockStoragePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSLoadBalancingPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSNetworkingPolicy
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+  # EKS Node Group Role
+  EKSNodeGroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  # ========================================
+  # EKS Clusters
+  # ========================================
+  
+  # EKS Cluster 1 - Capabilities
+  EKSCluster1:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${WorkshopName}-cluster-1-platform'
+      Version: '1.35'
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnet1A
+          - !Ref PublicSubnet1B
+          - !Ref PrivateSubnet1A
+          - !Ref PrivateSubnet1B
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+      ComputeConfig:
+        Enabled: true
+        NodePools: 
+          - general-purpose
+          - system
+        NodeRoleArn: !GetAtt EKSNodeGroupRole.Arn
+      KubernetesNetworkConfig:
+        ElasticLoadBalancing:
+          Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cluster-1-platform'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'EKS Capabilities Demo'
+
+  # EKS Cluster 2 - CNOE DIY
+  EKSCluster2:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${WorkshopName}-cluster-2-cnoe-diy'
+      Version: '1.35'
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnet2A
+          - !Ref PublicSubnet2B
+          - !Ref PrivateSubnet2A
+          - !Ref PrivateSubnet2B
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+      ComputeConfig:
+        Enabled: true
+        NodePools: 
+          - general-purpose
+          - system
+        NodeRoleArn: !GetAtt EKSNodeGroupRole.Arn
+      KubernetesNetworkConfig:
+        ElasticLoadBalancing:
+          Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cluster-2-cnoe-diy'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'CNOE DIY Implementation'
+
+  # EKS Cluster 3 - Apps Platform
+  EKSCluster3:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${WorkshopName}-cluster-3-apps'
+      Version: '1.35'
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnet3A
+          - !Ref PublicSubnet3B
+          - !Ref PrivateSubnet3A
+          - !Ref PrivateSubnet3B
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+      ComputeConfig:
+        Enabled: true
+        NodePools: 
+          - general-purpose
+          - system
+        NodeRoleArn: !GetAtt EKSNodeGroupRole.Arn
+      KubernetesNetworkConfig:
+        ElasticLoadBalancing:
+          Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cluster-3-apps'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+        - Key: Purpose
+          Value: 'Applications Platform'
+
+  # Pod Identity Association for External Secrets
+  ExternalSecretsPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster1
+      Namespace: external-secrets
+      ServiceAccount: external-secrets
+      RoleArn: !GetAtt EKSClusterRole.Arn
+    DependsOn: EKSCluster1
+
+  # ========================================
+  # EKS Addons
+  # ========================================
+
+  # Pod Identity Agent - Cluster 1
+  PodIdentityAgentCluster1:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref EKSCluster1
+      AddonName: eks-pod-identity-agent
+    DependsOn: EKSCluster1
+
+  # Pod Identity Agent - Cluster 2
+  PodIdentityAgentCluster2:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      AddonName: eks-pod-identity-agent
+    DependsOn: EKSCluster2
+
+  # Pod Identity Agent - Cluster 3
+  PodIdentityAgentCluster3:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref EKSCluster3
+      AddonName: eks-pod-identity-agent
+    DependsOn: EKSCluster3
+
+  # ========================================
+  # Crossplane IAM Role (Pod Identity)
+  # ========================================
+
+  # IAM Role for Crossplane Providers (Pod Identity)
+  # Note: The Pod Identity Association is created during the workshop
+  # after the aws-providers-sa ServiceAccount is applied via kubectl.
+  CrossplaneProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-crossplane-provider-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-crossplane-provider-role'
+        - Key: Workshop
+          Value: !Ref WorkshopName
+
+  # ========================================================================
+  # CNOE prerequisites on cluster 2 (module 4)
+  # ------------------------------------------------------------------------
+  # The CNOE reference-implementation-aws can be installed on an EXISTING
+  # cluster "only if the prerequisites are completed" - and the prerequisites
+  # are Pod Identity Associations, which its own eksctl path would have created
+  # while creating a cluster. Cluster 2 already exists when the participant
+  # reaches module 4, so the associations are created here instead.
+  #
+  # The list comes from cluster/eksctl/cluster-config-auto.yaml in that
+  # repository (the Auto Mode variant): crossplane, external-secrets and
+  # external-dns. The non-Auto-Mode variant also needs the AWS Load Balancer
+  # Controller and the EBS CSI driver - EKS Auto Mode provides both, and this
+  # workshop sets auto_mode: "true", so they are correctly absent here.
+  #
+  # Each association is created BEFORE the service account exists, which is
+  # supported: the association is a binding by (namespace, serviceAccount) name
+  # and starts working the moment the CNOE installer creates the account.
+  CnoeCrossplaneRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-cnoe-crossplane-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: pods.eks.amazonaws.com }
+            Action: [sts:AssumeRole, sts:TagSession]
+      # Crossplane provisions arbitrary AWS resources on the participant's
+      # behalf, which is what the upstream config also grants. Upstream pairs it
+      # with a permissions boundary; in a disposable workshop account the
+      # boundary adds a failure mode without adding protection.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  CnoeCrossplanePodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      Namespace: crossplane-system
+      ServiceAccount: provider-aws
+      RoleArn: !GetAtt CnoeCrossplaneRole.Arn
+
+  CnoeExternalSecretsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-cnoe-external-secrets-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: pods.eks.amazonaws.com }
+            Action: [sts:AssumeRole, sts:TagSession]
+      Policies:
+        - PolicyName: secretsmanager-read
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # ListSecrets and BatchGetSecretValue cannot be scoped to a
+              # resource - they are account-wide by design.
+              - Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:BatchGetSecretValue
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecretVersionIds
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cnoe-ref-impl/*'
+
+  CnoeExternalSecretsPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      Namespace: external-secrets
+      ServiceAccount: external-secrets
+      RoleArn: !GetAtt CnoeExternalSecretsRole.Arn
+
+  CnoeExternalDnsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-cnoe-external-dns-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: pods.eks.amazonaws.com }
+            Action: [sts:AssumeRole, sts:TagSession]
+      Policies:
+        # Equivalent of the eksctl wellKnownPolicies.externalDNS.
+        - PolicyName: external-dns
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: route53:ChangeResourceRecordSets
+                Resource: 'arn:aws:route53:::hostedzone/*'
+              - Effect: Allow
+                Action:
+                  - route53:ListHostedZones
+                  - route53:ListResourceRecordSets
+                  - route53:ListTagsForResource
+                Resource: '*'
+
+  CnoeExternalDnsPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      Namespace: external-dns
+      ServiceAccount: external-dns
+      RoleArn: !GetAtt CnoeExternalDnsRole.Arn
+
+  # ========================================
+  # EKS Access Entries for Workshop Studio Roles
+  # ========================================
+
+  # Participant Role Access Entry - Cluster 1
+  ParticipantAccessEntryCluster1:
+    Type: AWS::EKS::AccessEntry
+    # WSParticipantRole is created by the workshop hosting platform, so it only
+    # exists when the stack runs in a provisioned workshop account. In a plain
+    # AWS account the role is absent and the AccessEntry would fail at CREATE,
+    # so it is gated on prod. In dev the principal that created the cluster keeps
+    # implicit EKS admin, which is enough to run every lab.
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster1
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSParticipantRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster1
+
+  # Participant Role Access Entry - Cluster 2
+  ParticipantAccessEntryCluster2:
+    Type: AWS::EKS::AccessEntry
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSParticipantRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster2
+
+  # Participant Role Access Entry - Cluster 3
+  ParticipantAccessEntryCluster3:
+    Type: AWS::EKS::AccessEntry
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster3
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSParticipantRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster3
+
+  # Ops Role Access Entry - Cluster 1
+  OpsAccessEntryCluster1:
+    Type: AWS::EKS::AccessEntry
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster1
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSOpsRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster1
+
+  # Ops Role Access Entry - Cluster 2
+  OpsAccessEntryCluster2:
+    Type: AWS::EKS::AccessEntry
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSOpsRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster2
+
+  # Ops Role Access Entry - Cluster 3
+  OpsAccessEntryCluster3:
+    Type: AWS::EKS::AccessEntry
+    Condition: IsProdEnvironment
+    Properties:
+      ClusterName: !Ref EKSCluster3
+      PrincipalArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/WSOpsRole'
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
+    DependsOn: EKSCluster3
+
+
+  # ========================================
+  # VPC Peering Connections
+  # ========================================
+  
+  # VPC Peering: VPC1 <-> VPC2
+  VPCPeering1to2:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC1
+      PeerVpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-peering-1-to-2'
+
+  # VPC Peering: VPC1 <-> VPC3
+  VPCPeering1to3:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC1
+      PeerVpcId: !Ref VPC3
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-peering-1-to-3'
+
+  # VPC Peering: VPC2 <-> VPC3
+  VPCPeering2to3:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC2
+      PeerVpcId: !Ref VPC3
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-peering-2-to-3'
+
+  # Routes for VPC1 to VPC2
+  VPC1toVPC2Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering1to2
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 10.1.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering1to2
+
+  # The ALB lives in VPC1's PUBLIC subnets; without this route its traffic to
+  # cluster 2's ingress-nginx (VPC2) dies at routing and every access via
+  # INGRESS_DNS answers 504 (measured in event fb1c47c8).
+  VPC1PublicToVPC2Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering1to2
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 10.1.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering1to2
+
+  # Routes for VPC1 to VPC3
+  VPC1toVPC3Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering1to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 10.2.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering1to3
+
+  # Routes for VPC2 to VPC1
+  VPC2toVPC1Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering1to2
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 10.0.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering1to2
+
+  # Routes for VPC2 to VPC3
+  VPC2toVPC3Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering2to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 10.2.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering2to3
+
+  # Routes for VPC3 to VPC1
+  VPC3toVPC1Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering1to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 10.0.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering1to3
+
+  # Routes for VPC3 to VPC2
+  VPC3toVPC2Route:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering2to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 10.1.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering2to3
+
+  # Application Load Balancer for CNOE Ingress
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Workshop ALB
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS traffic
+      # Declared explicitly to replace the implicit allow-all egress a security
+      # group is born with. The ALB only ever talks to its targets, which are
+      # pod IPs inside VPC 1 - there are no RFC 6598 pod subnets here, pods take
+      # addresses from the VPC CIDR. The port range stays open because the
+      # Load Balancer Controller registers targets on whatever port the
+      # Kubernetes Service declares, not on a port known at deploy time.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 1
+          ToPort: 65535
+          CidrIp: 10.0.0.0/16
+          Description: 'Targets inside VPC 1 only'
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-alb-sg'
+
+  WorkshopALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # An internet-facing ALB requires the VPC to already have the internet
+    # gateway ATTACHED. The dependency is real but invisible to CloudFormation
+    # (the ALB references subnets, and subnets do not depend on the attachment),
+    # so without this DependsOn the creation runs in parallel and fails
+    # intermittently with "VPC ... has no internet gateway" - observed in
+    # Workshop Studio provisioning on 2026-08-06 (it passed in a dev account by
+    # luck of ordering).
+    DependsOn: InternetGatewayAttachment1
+    Properties:
+      Name: !Sub '${WorkshopName}-alb'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1A
+        - !Ref PublicSubnet1B
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-alb'
+        - Key: ingress.k8s.aws/stack
+          Value: !Sub '${WorkshopName}-ingress-group'
+        - Key: elbv2.k8s.aws/cluster
+          Value: !Sub '${WorkshopName}-cluster-1-platform'
+
+  DefaultTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${WorkshopName}-default-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC1
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-default-tg'
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WorkshopALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DefaultTargetGroup
+
+  # ========================================
+  # Backstage Build Infrastructure
+  # ========================================
+  
+  # ECR Repository for Backstage Image
+  BackstageECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${WorkshopName}-backstage'
+      # An ECR repository holding images CANNOT be deleted, and that blocks more
+      # than cleanup: the automatic build pushes the image during the stack
+      # CREATE, so any failure AFTER it makes the automatic rollback try to
+      # delete a repository that already has content. The result is a stack stuck
+      # in ROLLBACK_FAILED, requiring manual intervention in the participant's
+      # account. Observed while deleting the test stack: DELETE_FAILED with
+      # "cannot be deleted because it still contains images".
+      EmptyOnDelete: true
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 5 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-backstage-repo'
+
+  # IAM Role for CodeBuild
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+      Policies:
+        - PolicyName: CodeBuildBasePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${WorkshopName}-backstage-build'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${WorkshopName}-backstage-build:*'
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: '*'
+              # Self-contained source delivery: Source.Type is NO_SOURCE, so the
+              # buildspec pulls the versioned build-assets/ tree from the
+              # WorkshopAssetsBucket into ./build-assets/ instead of cloning a
+              # repository. Read is granted on that one bucket only, to keep the
+              # build role least privilege.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${WorkshopAssetsBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::${WorkshopAssetsBucket}'
+              # Marketplace actions are what Bedrock Zero Click Model Access uses
+              # to accept the model subscription on the account's behalf. Without
+              # them the first InvokeModel fails with AccessDenied even though the
+              # bedrock:* permissions below are correct.
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                  - aws-marketplace:ViewSubscriptions
+                Resource: '*'
+              # Bedrock invoke is scoped to the cross-region inference profiles AND
+              # to the underlying foundation models in every region a `us.` profile
+              # routes to. Scoping to the profile alone is not enough: the request
+              # is authorised against the resolved model ARN in the destination
+              # region, so a profile-only policy fails intermittently depending on
+              # where the call lands. Covering both supported models here also means
+              # switching BedrockModelId needs no policy edit.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-*'
+                  - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-*'
+                  - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-*'
+                  - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-*'
+
+  # CodeBuild Project for Backstage
+  BackstageCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${WorkshopName}-backstage-build'
+      Description: 'Build Backstage with GenAI plugin for workshop'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref BackstageECRRepository
+          - Name: IMAGE_TAG
+            Value: latest
+          # Self-contained source delivery: the buildspec pulls the versioned
+          # build-assets/ tree from this bucket because Source.Type is NO_SOURCE.
+          - Name: WORKSHOP_ASSETS_BUCKET
+            Value: !Ref WorkshopAssetsBucket
+          # Prefix inside the bucket. Empty for manual deploys; in Workshop
+          # Studio it receives {{.AssetsBucketPrefix}} (which already ends
+          # with '/').
+          - Name: ASSETS_PREFIX
+            Value: !Ref AssetsBucketPrefix
+      Source:
+        Type: NO_SOURCE
+        # The buildspec is deliberately SHORT: it only fetches the versioned
+        # build files from S3 and calls `docker build`. The whole Backstage build
+        # recipe lives in build-assets/Dockerfile, a versioned file in the
+        # workshop repository that the student can read.
+        #
+        # Why the Dockerfile is NOT inlined here: a Dockerfile written as a
+        # heredoc inside YAML cannot be read, reviewed or tested locally. As a
+        # file, the student can run exactly the same build on their own machine:
+        #   docker build -f build-assets/Dockerfile -t backstage-genai .
+        BuildSpec: |
+          version: 0.2
+          env:
+            variables:
+              NODE_OPTIONS: '--max-old-space-size=4096'
+          phases:
+            pre_build:
+              commands:
+                - echo "Build iniciado em `date` - psp-backstage-build"
+                # Source.Type is NO_SOURCE, so the docker build context starts
+                # empty. We pull the versioned build-assets/ tree (Dockerfile,
+                # configs and patch scripts) from the WorkshopAssetsBucket.
+                - echo "[assets] baixando de s3://$WORKSHOP_ASSETS_BUCKET/${ASSETS_PREFIX}backstage-genai/"
+                - aws s3 cp "s3://${WORKSHOP_ASSETS_BUCKET}/${ASSETS_PREFIX}backstage-genai/" ./build-assets/ --recursive
+                # Prerequisite gates: fail fast, with a clear message, if the
+                # asset upload did not happen or is incomplete.
+                - 'test -f build-assets/Dockerfile || (echo "[assets] ERRO: build-assets/Dockerfile ausente - rode scripts/upload-backstage-genai-assets.sh"; exit 1)'
+                - 'test -f build-assets/app-config.genai.yaml || (echo "[assets] ERRO: build-assets/app-config.genai.yaml ausente"; exit 1)'
+                - 'test -f build-assets/app-config.workshop.yaml || (echo "[assets] ERRO: build-assets/app-config.workshop.yaml ausente"; exit 1)'
+                - 'test -f build-assets/apply-genai-patches.js || (echo "[assets] ERRO: build-assets/apply-genai-patches.js ausente"; exit 1)'
+                - 'test -f build-assets/add-genai-resolutions.js || (echo "[assets] ERRO: build-assets/add-genai-resolutions.js ausente"; exit 1)'
+                - echo "[assets] OK - todos os arquivos de build presentes"
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+                - IMAGE_TAG=${IMAGE_TAG:-latest}
+            build:
+              commands:
+                # Stages 1-7 are documented inside the Dockerfile itself:
+                # scaffold -> lockfile -> plugin packages -> dependency pin
+                # -> patches -> type-check/build -> final production image.
+                - echo "[build] docker build -f build-assets/Dockerfile"
+                - docker build -f build-assets/Dockerfile -t $REPOSITORY_URI:latest .
+                - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo "Build concluido em `date`"
+                - docker push $REPOSITORY_URI:latest
+                - docker push $REPOSITORY_URI:$IMAGE_TAG
+                - printf '[{"name":"backstage","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+          artifacts:
+            files: imagedefinitions.json
+      TimeoutInMinutes: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-backstage-build'
+
+  # ------------------------------------------------------------------------
+  # AUTOMATIC trigger of the Backstage image build
+  # ------------------------------------------------------------------------
+  # The participant should NOT have to run the build: the Backstage image takes
+  # a few minutes to build and that would consume lab time. This custom resource
+  # starts the build during account provisioning and WAITS for completion, so
+  # that by the time the participant enters the account the image is already
+  # published in ECR.
+  #
+  # It runs in parallel with the EKS cluster creation (it depends only on the
+  # CodeBuild project), so it adds no time to the critical path. If the build
+  # fails, the stack fails explicitly instead of letting the participant find
+  # out later that the ECR repository is empty.
+  BackstageBuildTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: start-backstage-build
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt BackstageCodeBuildProject.Arn
+
+  BackstageBuildTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${WorkshopName}-backstage-build-trigger'
+      Handler: index.handler
+      Runtime: python3.13
+      Timeout: 900
+      Role: !GetAtt BackstageBuildTriggerRole.Arn
+      Code:
+        ZipFile: |
+          import time
+          import boto3
+          import cfnresponse
+
+          TERMINAL = ("SUCCEEDED", "FAILED", "FAULT", "TIMED_OUT", "STOPPED")
+
+          def handler(event, context):
+              # Only Create triggers the build. Update and Delete are no-ops:
+              # deleting the stack should not try to build anything, and an
+              # update to another resource does not need a new image.
+              if event["RequestType"] != "Create":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  project = event["ResourceProperties"]["ProjectName"]
+                  cb = boto3.client("codebuild")
+                  build_id = cb.start_build(projectName=project)["build"]["id"]
+                  print("build iniciado: %s" % build_id)
+
+                  # Leaves margin to respond to CloudFormation before the Lambda
+                  # timeout: without it a slow build would leave the stack stuck
+                  # waiting for a callback that never arrives.
+                  deadline = time.time() + 780
+                  status = "IN_PROGRESS"
+                  while time.time() < deadline:
+                      time.sleep(15)
+                      build = cb.batch_get_builds(ids=[build_id])["builds"][0]
+                      status = build["buildStatus"]
+                      if status in TERMINAL:
+                          break
+                  print("status final: %s" % status)
+
+                  if status == "SUCCEEDED":
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                                       {"BuildId": build_id, "BuildStatus": status})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                       reason="Build %s terminou como %s. Veja os logs em "
+                                              "/aws/codebuild/%s" % (build_id, status, project))
+              except Exception as exc:
+                  print("erro: %s" % exc)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(exc))
+
+  BackstageBuildTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: BackstageECRRepository
+    Properties:
+      ServiceToken: !GetAtt BackstageBuildTriggerFunction.Arn
+      ProjectName: !Ref BackstageCodeBuildProject
+
+  # ========================================================================
+  # GenAI plugin - IAM, Pod Identity, Lambdas and Bedrock wiring
+  # ------------------------------------------------------------------------
+  # Cluster reconciliation: these resources were originally authored against a
+  # logical id `WorkshopCluster`. The Backstage Deployment runs on the Apps
+  # Platform cluster, which this template defines as `EKSCluster3`, so every
+  # `!Ref WorkshopCluster` is wired to `!Ref EKSCluster3` below. Keep that in
+  # mind when porting resources in or out of this file.
+  # ========================================================================
+
+  # ----- IAM role + EKS Pod Identity (genai-plugin-iam.yaml) --------------
+  BackstageBackendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-backstage-backend-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      Policies:
+        - PolicyName: bedrock-invoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-*'
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-*'
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                  - aws-marketplace:ViewSubscriptions
+                Resource: '*'
+
+  # ------------------------------------------------------------------------
+  # Backstage portal: ALB + CloudFront
+  # ------------------------------------------------------------------------
+  # Why the load balancer is created HERE, and not by a Service of type
+  # LoadBalancer in Kubernetes:
+  #
+  #   CloudFront needs the load balancer DNS as its origin, and Backstage needs
+  #   to know its own public URL (APP_BASE_URL) to generate the paths of its
+  #   bundles. If the load balancer were born together with the Service, the URL
+  #   would only exist AFTER the deploy - forcing the participant to create the
+  #   Service, wait for DNS, create/adjust CloudFront and only then restart
+  #   Backstage with the correct URL.
+  #
+  #   By creating the ALB and CloudFront at provisioning time, the portal URL
+  #   already exists before the lab starts: the participant applies the manifest
+  #   with the URL ready and opens the browser. No waiting and no second
+  #   rollout.
+  #
+  #   The pod joins the target group via TargetGroupBinding (an EKS Auto Mode
+  #   CRD), so Kubernetes remains the one registering and deregistering targets.
+  #
+  # And why CloudFront rather than the ALB directly: the workshop account has no
+  # domain and no ACM certificate, so the ALB alone would serve plain HTTP - and
+  # browsers with an HTTPS-only policy do not open HTTP pages, failing as a blank
+  # page. CloudFront delivers valid HTTPS on the *.cloudfront.net domain without
+  # requiring a domain of your own.
+  BackstagePortalSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${WorkshopName} Backstage portal ALB - CloudFront origins only'
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !FindInMap [CloudFrontOriginPrefixList, !Ref 'AWS::Region', PrefixList]
+          Description: 'CloudFront origin-facing servers only'
+      # Declared explicitly to replace the implicit allow-all egress. This ALB
+      # has exactly one destination: the Backstage pod on 7007, which is the
+      # mirror image of BackstagePortalToPodIngress below. Health check and
+      # traffic both use that port.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 7007
+          ToPort: 7007
+          CidrIp: 10.0.0.0/16
+          Description: 'Backstage pod on 7007, inside VPC 1'
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-backstage-portal-sg'
+        - Key: auto-delete
+          Value: 'no'
+
+  # Allows the portal ALB to reach the Backstage pod. The cluster security
+  # group does not know about the ALB, so without this rule the health check
+  # fails with Target.Timeout while the pod answers normally on localhost - a
+  # symptom that looks like an application problem but is a network one.
+  BackstagePortalToPodIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt EKSCluster1.ClusterSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 7007
+      ToPort: 7007
+      SourceSecurityGroupId: !Ref BackstagePortalSecurityGroup
+      Description: 'Backstage portal ALB to the pod on port 7007'
+
+  BackstagePortalLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # Same invisible dependency as WorkshopALB: internet-facing requires the
+    # IGW attached, and nothing here references the attachment.
+    DependsOn: InternetGatewayAttachment1
+    Properties:
+      Name: !Sub '${WorkshopName}-backstage-alb'
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1A
+        - !Ref PublicSubnet1B
+      SecurityGroups:
+        - !Ref BackstagePortalSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-backstage-alb'
+        - Key: auto-delete
+          Value: 'no'
+
+  BackstagePortalTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${WorkshopName}-backstage-tg'
+      VpcId: !Ref VPC1
+      Protocol: HTTP
+      Port: 7007
+      # target-type ip: in EKS Auto Mode the ALB talks directly to the pod IP.
+      TargetType: ip
+      # The health check hits the GenAI plugin's own endpoint: a healthy target
+      # means the plugin loaded and the agent was instantiated.
+      HealthCheckPath: /api/aws-genai/health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-backstage-tg'
+        - Key: auto-delete
+          Value: 'no'
+
+  BackstagePortalListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BackstagePortalLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackstagePortalTargetGroup
+
+  BackstagePortalDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        Comment: !Sub '${WorkshopName} Backstage portal'
+        Origins:
+          - Id: backstage-alb
+            DomainName: !GetAtt BackstagePortalLoadBalancer.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only
+              # The plugin chat responds over SSE (streaming). The default 30s
+              # timeout would cut long answers in the middle.
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: backstage-alb
+          ViewerProtocolPolicy: redirect-to-https
+          # CachingDisabled + AllViewer: the portal is dynamic and authenticated,
+          # and the chat relies on streaming - nothing here can be cached, and
+          # every header and cookie needs to reach the origin.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+      Tags:
+        - Key: auto-delete
+          Value: 'no'
+
+  # Published to Parameter Store so the lab does not depend on the stack name
+  # (which changes in Workshop Studio).
+  BackstagePortalUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/backstage-portal-url'
+      Type: String
+      Value: !Sub 'https://${BackstagePortalDistribution.DomainName}'
+
+  BackstageTargetGroupArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/backstage-target-group-arn'
+      Type: String
+      Value: !Ref BackstagePortalTargetGroup
+
+  BackstagePodIdentityAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      # Cluster 1 (Platform): Backstage is a PLATFORM tool, so it runs on the
+      # platform cluster. Cluster 3 (Apps) is meant for the production workloads
+      # provisioned by the environment, not for the portal.
+      ClusterName: !Ref EKSCluster1
+      Namespace: backstage
+      ServiceAccount: backstage-backend
+      RoleArn: !GetAtt BackstageBackendRole.Arn
+
+  # ----- Pre-warm Lambda (genai-plugin-prewarm-lambda.yaml) ---------------
+  PrewarmLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-bedrock-prewarm-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: bedrock-invoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-*'
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-*'
+                  - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-*'
+                  - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-*'
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                  - aws-marketplace:ViewSubscriptions
+                Resource: '*'
+
+  PrewarmLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${WorkshopName}-bedrock-prewarm'
+      RetentionInDays: 7
+
+  PrewarmLambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: PrewarmLambdaLogGroup
+    Properties:
+      FunctionName: !Sub '${WorkshopName}-bedrock-prewarm'
+      Runtime: python3.12
+      Handler: handler.handler
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt PrewarmLambdaRole.Arn
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REGION: !Ref AWS::Region
+      Code:
+        S3Bucket: !Ref WorkshopAssetsBucket
+        S3Key: !Sub '${AssetsBucketPrefix}lambda/prewarm.zip'
+
+  BedrockPrewarm:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt PrewarmLambdaFunction.Arn
+      ModelId: !Ref BedrockModelId
+      Region: !Ref AWS::Region
+
+  # ----- 14-day supported-list validator (prod only) ---------------------
+  #        (genai-plugin-supported-list-validator.yaml)
+  SupportedListValidatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-supported-list-validator-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: bedrock-model-availability
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:GetFoundationModel
+                  - bedrock:ListFoundationModels
+                  # The workshop configures a cross-region inference profile (id
+                  # with the `us.` prefix), and profile and model are validated
+                  # by different APIs. Without these two actions the custom
+                  # resource rejects an accessible model and brings the stack
+                  # down at provisioning time.
+                  - bedrock:GetInferenceProfile
+                  - bedrock:ListInferenceProfiles
+                Resource: '*'
+
+  SupportedListValidatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${WorkshopName}-supported-list-validator'
+      RetentionInDays: 7
+
+  SupportedListValidatorFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: SupportedListValidatorLogGroup
+    Properties:
+      FunctionName: !Sub '${WorkshopName}-supported-list-validator'
+      Runtime: python3.12
+      Handler: handler.handler
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt SupportedListValidatorRole.Arn
+      Environment:
+        Variables:
+          WORKSHOP_DOC_URL: 'https://catalog.workshops.aws/docs/en-US/detailed-documentation/marketplace'
+          MIN_DAYS_ON_LIST: '14'
+      Code:
+        S3Bucket: !Ref WorkshopAssetsBucket
+        S3Key: !Sub '${AssetsBucketPrefix}lambda/supported-list-validator.zip'
+
+  SupportedListValidator:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SupportedListValidatorFunction.Arn
+      ModelId: !Ref BedrockModelId
+      Region: !Ref AWS::Region
+      MinDaysOnList: 14
+  VPCIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/vpc-1-id'
+      Type: String
+      Value: !Ref VPC1
+      Description: 'VPC 1 ID for CNOE Workshop'
+  
+  ALBDNSParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/alb-dns'
+      Type: String
+      Value: !GetAtt WorkshopALB.DNSName
+      Description: 'ALB DNS for CNOE Ingress'
+  
+  ALBARNParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/alb-arn'
+      Type: String
+      Value: !Ref WorkshopALB
+      Description: 'ALB ARN for CNOE Ingress Group'
+
+  PublicSubnet1Parameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/public-subnet-1a'
+      Type: String
+      Value: !Ref PublicSubnet1A
+      Description: 'Public Subnet 1A ID for CNOE Workshop'
+
+  PublicSubnet2Parameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/workshop/${WorkshopName}/public-subnet-1b'
+      Type: String
+      Value: !Ref PublicSubnet1B
+      Description: 'Public Subnet 1B ID for CNOE Workshop'
+
+Outputs:
+  Cluster1Name:
+    Description: 'EKS Cluster 1 Name (Capabilities)'
+    Value: !Ref EKSCluster1
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster1Name'
+
+  Cluster1Endpoint:
+    Description: 'EKS Cluster 1 Endpoint'
+    Value: !GetAtt EKSCluster1.Endpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster1Endpoint'
+
+  Cluster2Name:
+    Description: 'EKS Cluster 2 Name (CNOE DIY)'
+    Value: !Ref EKSCluster2
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster2Name'
+
+  Cluster2Endpoint:
+    Description: 'EKS Cluster 2 Endpoint'
+    Value: !GetAtt EKSCluster2.Endpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster2Endpoint'
+
+  Cluster3Name:
+    Description: 'EKS Cluster 3 Name (Apps Platform)'
+    Value: !Ref EKSCluster3
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster3Name'
+
+  Cluster3Endpoint:
+    Description: 'EKS Cluster 3 Endpoint'
+    Value: !GetAtt EKSCluster3.Endpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster3Endpoint'
+
+  IngressDNS:
+    Description: 'ALB DNS - Use this as INGRESS_DNS for CNOE installation'
+    Value: !GetAtt WorkshopALB.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-IngressDNS'
+
+  IngressGroupName:
+    Description: 'Ingress Group Name - Use this in your Ingress annotations'
+    Value: !Sub '${WorkshopName}-ingress-group'
+    Export:
+      Name: !Sub '${AWS::StackName}-IngressGroupName'
+
+  VPC1Id:
+    Description: 'VPC 1 ID (Capabilities Cluster)'
+    Value: !Ref VPC1
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC1Id'
+
+  VPC2Id:
+    Description: 'VPC 2 ID (CNOE DIY Cluster)'
+    Value: !Ref VPC2
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC2Id'
+
+  VPC3Id:
+    Description: 'VPC 3 ID (Apps Platform Cluster)'
+    Value: !Ref VPC3
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC3Id'
+
+  PublicSubnet1AId:
+    Description: 'Public Subnet 1A ID'
+    Value: !Ref PublicSubnet1A
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet1AId'
+
+  PublicSubnet1BId:
+    Description: 'Public Subnet 1B ID'
+    Value: !Ref PublicSubnet1B
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet1BId'
+
+  BackstageECRRepositoryUri:
+    Description: 'Backstage ECR Repository URI'
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BackstageECRRepository}'
+    Export:
+      Name: !Sub '${AWS::StackName}-BackstageECRUri'
+
+  # S3 URI of the Backstage deploy manifest. The participant does not have the
+  # workshop repository cloned, so they download the manifest from here during
+  # the lab (Phase 4).
+  BackstagePortalUrl:
+    Description: HTTPS URL of the Backstage portal (CloudFront). Available before the lab starts.
+    Value: !Sub 'https://${BackstagePortalDistribution.DomainName}'
+
+  BackstageTargetGroupArn:
+    Description: ARN of the target group where the Backstage pod registers via TargetGroupBinding
+    Value: !Ref BackstagePortalTargetGroup
+
+  BackstageManifestS3Uri:
+    Description: S3 URI of the Backstage Kubernetes manifest (Phase 4 - GenAI plugin)
+    Value: !Sub 's3://${WorkshopAssetsBucket}/${AssetsBucketPrefix}backstage-genai/k8s/backstage.yaml'
+
+  BackstageCodeBuildProjectName:
+    Description: 'CodeBuild Project Name for Backstage'
+    Value: !Ref BackstageCodeBuildProject
+    Export:
+      Name: !Sub '${AWS::StackName}-BackstageCodeBuildProject'
+
+  CrossplaneProviderRoleArn:
+    Description: 'IAM Role ARN for Crossplane Providers (Pod Identity)'
+    Value: !GetAtt CrossplaneProviderRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CrossplaneProviderRoleArn'
+
+  NextSteps:
+    Description: 'Workshop Setup Instructions'
+    Value: !Sub |
+      3 EKS Auto Mode clusters ready!
+      
+      Cluster 1 (Capabilities): ${WorkshopName}-cluster-1-platform
+      Cluster 2 (CNOE DIY): ${WorkshopName}-cluster-2-cnoe-diy
+      Cluster 3 (Apps Platform): ${WorkshopName}-cluster-3-apps
+      
+      IMPORTANT: Use the following values for CNOE installation:
+      
+      INGRESS_DNS: ${WorkshopALB.DNSName}
+      INGRESS_GROUP: ${WorkshopName}-ingress-group
+      
+      All clusters are in VPC peering configuration for cross-cluster communication.
+      
+      Backstage Build:
+      - ECR Repository: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BackstageECRRepository}
+      - CodeBuild Project: ${BackstageCodeBuildProject}
+      - To build Backstage image: aws codebuild start-build --project-name ${BackstageCodeBuildProject}
+      
+      Region: ${AWS::Region}

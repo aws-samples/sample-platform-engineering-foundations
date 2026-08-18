@@ -1,0 +1,293 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: serverless-app
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: ServerlessApp
+    spec:
+      # --- Application settings ---
+      appName: string
+      region: string | default="us-east-1"
+      environment: string | default="dev"
+
+      # --- Network ---
+      vpcId: string
+      subnetId1: string
+      subnetId2: string
+
+      # --- RDS settings ---
+      databaseName: string | default="appdb"
+      dbInstanceClass: string | default="db.t3.medium"
+      dbEngineVersion: string | default="17.4"
+      storageGB: integer | default=20
+
+      # --- Lambda settings ---
+      lambdaS3Bucket: string
+      lambdaS3Key: string | default="lambda/backend.zip"
+      lambdaMemoryMB: integer | default=256
+      lambdaTimeoutSeconds: integer | default=30
+
+    status:
+      rdsEndpoint: string
+      apiEndpoint: string
+      frontendBucket: string
+
+  resources:
+    # ==========================================================
+    # 1. RDS Subnet Group
+    # ==========================================================
+    - id: rdsSubnetGroup
+      template:
+        apiVersion: rds.services.k8s.aws/v1alpha1
+        kind: DBSubnetGroup
+        metadata:
+          name: ${schema.spec.appName}-rds-subnet-group
+        spec:
+          name: ${schema.spec.appName}-rds-subnet-group
+          description: "Subnet group for ${schema.spec.appName} RDS"
+          subnetIDs:
+            - ${schema.spec.subnetId1}
+            - ${schema.spec.subnetId2}
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # 2. RDS Security Group
+    # ==========================================================
+    - id: rdsSG
+      template:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: SecurityGroup
+        metadata:
+          name: ${schema.spec.appName}-rds-sg
+        spec:
+          description: "Allow PostgreSQL access from Lambda"
+          name: ${schema.spec.appName}-rds-sg
+          vpcID: ${schema.spec.vpcId}
+          ingressRules:
+            - ipProtocol: tcp
+              fromPort: 5432
+              toPort: 5432
+              ipRanges:
+                - cidrIP: "10.0.0.0/8"
+                  description: "PostgreSQL from private subnets"
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # 3. RDS PostgreSQL Instance
+    # ==========================================================
+    - id: rdsInstance
+      dependsOn:
+        - rdsSubnetGroup
+        - rdsSG
+      template:
+        apiVersion: rds.services.k8s.aws/v1alpha1
+        kind: DBInstance
+        metadata:
+          name: ${schema.spec.appName}-rds
+        spec:
+          dbInstanceIdentifier: ${schema.spec.appName}-rds
+          dbInstanceClass: ${schema.spec.dbInstanceClass}
+          engine: postgres
+          engineVersion: ${schema.spec.dbEngineVersion}
+          masterUsername: postgres
+          manageMasterUserPassword: true
+          allocatedStorage: ${schema.spec.storageGB}
+          dbName: ${schema.spec.databaseName}
+          dbSubnetGroupName: ${schema.spec.appName}-rds-subnet-group
+          vpcSecurityGroupIDs:
+            - ${rdsSG.status.id}
+          publiclyAccessible: false
+          storageEncrypted: true
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # 4. Lambda IAM Role
+    # ==========================================================
+    - id: lambdaRole
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.appName}-lambda-role
+        spec:
+          name: ${schema.spec.appName}-lambda-role
+          assumeRolePolicyDocument: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "lambda.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            }
+          policies:
+            - arn: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # 5. Lambda Security Group
+    # ==========================================================
+    - id: lambdaSG
+      template:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: SecurityGroup
+        metadata:
+          name: ${schema.spec.appName}-lambda-sg
+        spec:
+          description: "Security group for Lambda functions"
+          name: ${schema.spec.appName}-lambda-sg
+          vpcID: ${schema.spec.vpcId}
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # 6. Lambda Function
+    # ==========================================================
+    - id: lambdaFunction
+      dependsOn:
+        - lambdaRole
+        - lambdaSG
+        - rdsInstance
+      template:
+        apiVersion: lambda.services.k8s.aws/v1alpha1
+        kind: Function
+        metadata:
+          name: ${schema.spec.appName}-backend
+        spec:
+          name: ${schema.spec.appName}-backend
+          runtime: python3.12
+          handler: index.handler
+          memorySize: ${schema.spec.lambdaMemoryMB}
+          timeout: ${schema.spec.lambdaTimeoutSeconds}
+          role: ${lambdaRole.status.ackResourceMetadata.arn}
+          code:
+            s3Bucket: ${schema.spec.lambdaS3Bucket}
+            s3Key: ${schema.spec.lambdaS3Key}
+          vpcConfig:
+            subnetIDs:
+              - ${schema.spec.subnetId1}
+              - ${schema.spec.subnetId2}
+            securityGroupIDs:
+              - ${lambdaSG.status.id}
+          environment:
+            variables:
+              DB_HOST: ${rdsInstance.status.endpoint.address}
+              DB_NAME: ${schema.spec.databaseName}
+              DB_PORT: "5432"
+          tags:
+            Environment: ${schema.spec.environment}
+            ManagedBy: KRO-ACK
+
+    # ==========================================================
+    # 7. API Gateway v2 (HTTP API)
+    # ==========================================================
+    - id: apiGateway
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: API
+        metadata:
+          name: ${schema.spec.appName}-http-api
+        spec:
+          name: ${schema.spec.appName}-http-api
+          protocolType: HTTP
+          tags:
+            Environment: ${schema.spec.environment}
+            ManagedBy: KRO-ACK
+
+    # ==========================================================
+    # 8. API Gateway Integration (Lambda proxy)
+    # ==========================================================
+    - id: apiIntegration
+      dependsOn:
+        - apiGateway
+        - lambdaFunction
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Integration
+        metadata:
+          name: ${schema.spec.appName}-integration
+        spec:
+          apiID: ${apiGateway.status.apiID}
+          integrationType: AWS_PROXY
+          integrationMethod: POST
+          integrationURI: ${lambdaFunction.status.ackResourceMetadata.arn}
+          payloadFormatVersion: "2.0"
+
+    # ==========================================================
+    # 9. API Gateway Route (catch-all)
+    # ==========================================================
+    - id: apiRoute
+      dependsOn:
+        - apiIntegration
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Route
+        metadata:
+          name: ${schema.spec.appName}-route
+        spec:
+          apiID: ${apiGateway.status.apiID}
+          routeKey: "ANY /"
+          target: integrations/${apiIntegration.status.integrationID}
+
+    # ==========================================================
+    # 10. API Gateway Stage ($default, auto-deploy)
+    # ==========================================================
+    - id: apiStage
+      dependsOn:
+        - apiRoute
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Stage
+        metadata:
+          name: ${schema.spec.appName}-stage
+        spec:
+          apiID: ${apiGateway.status.apiID}
+          stageName: "$default"
+          autoDeploy: true
+
+    # ==========================================================
+    # 11. S3 Bucket (frontend static assets)
+    # ==========================================================
+    - id: frontendBucket
+      template:
+        apiVersion: s3.services.k8s.aws/v1alpha1
+        kind: Bucket
+        metadata:
+          name: ${schema.spec.appName}-frontend
+        spec:
+          name: ${schema.spec.appName}-frontend
+          publicAccessBlock:
+            blockPublicAcls: true
+            blockPublicPolicy: true
+            ignorePublicAcls: true
+            restrictPublicBuckets: true
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK

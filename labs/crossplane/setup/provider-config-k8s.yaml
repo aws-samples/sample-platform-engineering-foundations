@@ -1,0 +1,23 @@
+# ProviderConfig for the local cluster (cluster-1)
+# Used by provider-kubernetes to create resources on the same cluster
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: cluster-1-local
+spec:
+  credentials:
+    source: InjectedIdentity
+---
+# ProviderConfig for the remote apps cluster (cluster-3)
+# Uses a kubeconfig Secret created during the workshop setup
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: cluster-3-apps
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cluster-3-kubeconfig
+      key: kubeconfig

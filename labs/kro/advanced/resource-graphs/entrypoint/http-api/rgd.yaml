@@ -1,0 +1,75 @@
+# Building block: HTTP API entrypoint
+# Wraps four ACK API Gateway v2 resources (API, Integration, Route, Stage)
+# behind a single WebAPI kind. Owned by the API platform team.
+#
+# payloadFormatVersion "1.0" delivers REST-style (v1) proxy events, so the
+# same Lambda handler works behind REST APIs and HTTP APIs.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: web-api
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: WebAPI
+    spec:
+      name: string
+      # ARN of the Lambda function that serves every route
+      targetFunctionArn: string
+      environment: string | default="dev"
+    status:
+      apiID: ${api.status.apiID}
+      apiEndpoint: ${api.status.apiEndpoint}
+
+  resources:
+    - id: api
+      readyWhen:
+        - ${api.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: API
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          protocolType: HTTP
+          tags:
+            Environment: ${schema.spec.environment}
+            ManagedBy: KRO-ACK
+
+    - id: integration
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Integration
+        metadata:
+          name: ${schema.spec.name}-integration
+        spec:
+          apiID: ${api.status.apiID}
+          integrationType: AWS_PROXY
+          integrationMethod: POST
+          integrationURI: ${schema.spec.targetFunctionArn}
+          payloadFormatVersion: "1.0"
+
+    - id: route
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Route
+        metadata:
+          name: ${schema.spec.name}-route
+        spec:
+          apiID: ${api.status.apiID}
+          # $default catches every path and method (unlike "ANY /",
+          # which only matches the root path)
+          routeKey: $default
+          target: integrations/${integration.status.integrationID}
+
+    - id: stage
+      template:
+        apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+        kind: Stage
+        metadata:
+          name: ${schema.spec.name}-stage
+        spec:
+          apiID: ${api.status.apiID}
+          stageName: $default
+          autoDeploy: true

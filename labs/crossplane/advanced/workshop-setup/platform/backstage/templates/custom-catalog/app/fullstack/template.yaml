@@ -1,0 +1,96 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: full-stack-deploy
+  title: Full stack with S3, Database and container
+  description: Full stack with S3, Database and container
+spec:
+  owner: guest
+  type: service
+  parameters:
+    - title: Configuration Options   # Defines the parameters the user must provide when using the template
+      required:
+        - name
+        - repoUrl
+        - namespace
+        - image
+        - port
+        - path
+      properties:
+        image:
+          description: Container Image
+          title: Container Image
+          type: string
+        port:
+          description: Container Port
+          title: Container Port
+          type: string
+        repoUrl:
+          description: Gitea URL on management cluster
+          title: Gitea URL
+          type: string
+        name:
+          title: Application Name
+          type: string
+          description: Unique name of the database
+        namespace:
+          default: default
+          title: Existing namespace to create this resource
+          type: string
+        path:
+          default: default
+          title: path API
+          type: string
+  steps:
+    - id: fetch-base
+      name: Fetch Base
+      action: fetch:template
+      input:
+        url: ./skeleton/  # Replaces variables inside the template with the values entered in the form
+        values:
+          name: ${{ parameters.name }}
+          repoUrl: ${{ parameters.repoUrl }}
+          namespace: ${{ parameters.namespace }}
+          image: ${{ parameters.image }}
+          port: ${{ parameters.port }}
+          path: ${{ parameters.path }}
+
+    - id: publish # Publishes the generated files to Gitea
+      name: Publishing to a Gitea repository
+      action: publish:gitea
+      input:
+        description: PostgreSQL Database manifests
+        repoUrl: ${{parameters.repoUrl}}?repo=${{parameters.name}}
+        defaultBranch: main
+
+    - id: create-argocd-app
+      name: Create ArgoCD App
+      action: cnoe:create-argocd-app
+      input:
+        appName: ${{ parameters.name }}
+        appNamespace: default
+        argoInstance: in-cluster
+        projectName: default
+        repoUrl: http://my-gitea-http.gitea.svc.cluster.local:3000/giteaAdmin/${{ parameters.name }}
+        path: "manifests"
+
+    - id: register # Registers the repository in the Backstage catalog
+      name: Register
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: 'catalog-info.yaml'
+
+    - id: template-output
+      name: Template Output
+      action: debug:log
+      input:
+        listWorkspace: true
+
+  output:
+    links:
+      - title: Repository   # Defines the output links displayed after the template runs
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

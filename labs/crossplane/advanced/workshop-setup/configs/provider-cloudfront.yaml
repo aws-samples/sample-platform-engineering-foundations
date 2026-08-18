@@ -1,0 +1,8 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-cloudfront
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-cloudfront:v1
+  runtimeConfigRef:
+    name: aws-irsa-drc

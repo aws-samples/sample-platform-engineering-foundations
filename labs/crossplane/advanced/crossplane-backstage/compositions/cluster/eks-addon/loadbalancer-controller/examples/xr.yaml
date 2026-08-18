@@ -1,0 +1,29 @@
+apiVersion: addon.cluster.platform.cloud/v1alpha1
+kind: LBController
+metadata:
+  name: lb-controller-dataplane-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      addon.cluster.platform.cloud/type: lbcontroller
+  parameters:
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    helmTargetProviderConfigRef:
+      name: helm-psp01-us-east-1-123456789012
+    kubernetesTargetProviderConfigRef:
+      name: kubernetes-psp01-us-east-1-123456789012
+    deletionPolicy: Delete
+    region: "us-east-1"
+    acronym: psp01
+    accountId: "123456789012"
+    vpcId: vpc-03cc42ba72b1b7795
+    loadbalancerController:
+      image: public.ecr.aws/eks/aws-load-balancer-controller
+      tag: v2.7.2
+    cluster:
+      name: dataplane-004-zsh7w-eks-cluster
+      oidcUri: oidc.eks.us-east-1.amazonaws.com/id/545A2A5D68675B7C9DB3EAF76B28A483
+    tags:
+      app: "psp"

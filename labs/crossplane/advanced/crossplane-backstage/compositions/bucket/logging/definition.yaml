@@ -1,0 +1,85 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xbucketloggings.bucket.platform.cloud
+spec:
+  group: bucket.platform.cloud
+  names:
+    kind: XBucketLogging
+    plural: xbucketloggings
+  claimNames:
+    kind: BucketLogging
+    plural: bucketloggings
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the bucket.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external 
+                        when this managed resource is deleted
+                        either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    name:
+                      type: string
+                      description: >-
+                        Name of the bucket and its resources.
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - deletionPolicy
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                Object with relevant information resulting from 
+                this composition to be used by other compositions.
+              properties:
+                bucket:
+                  type: object
+                  description: >-
+                    Output data from created bucket.
+                  properties:
+                    logging:
+                      type: object
+                      description: >-
+                        Bucket to store the logs.
+                      properties:
+                        bucketName:
+                          description: >-
+                            Name of the bucket logging.
+                          type: string
+                        bucketDomainName:
+                          description: >-
+                            Bucket domain name. Will be of format bucketname.s3.amazonaws.com.
+                          type: string

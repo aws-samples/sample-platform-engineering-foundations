@@ -1,0 +1,97 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdynamodbtable.database.platform.cloud
+  labels:
+    database.platform.cloud/type: dynamodbtable
+    dynamodbtable.database.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: database.platform.cloud/v1alpha1
+    kind: XDynamoDBTable
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+
+        resources:
+          - name: dynamodb-table
+            base:
+              apiVersion: dynamodb.aws.upbound.io/v1beta2
+              kind: Table
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.attribute
+                toFieldPath: spec.forProvider.attribute
+                policy:
+                  toFieldPath: MergeObjectsAppendArrays
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.hashKey
+                toFieldPath: spec.forProvider.hashKey
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.rangeKey
+                toFieldPath: spec.forProvider.rangeKey
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.billingMode
+                toFieldPath: spec.forProvider.billingMode
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.readCapacity
+                toFieldPath: spec.forProvider.readCapacity
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.writeCapacity
+                toFieldPath: spec.forProvider.writeCapacity
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.globalSecondaryIndex
+                toFieldPath: spec.forProvider.globalSecondaryIndex
+                policy:
+                  toFieldPath: MergeObjectsAppendArrays
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.localSecondaryIndex
+                toFieldPath: spec.forProvider.localSecondaryIndex
+                policy:
+                  toFieldPath: MergeObjectsAppendArrays
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.name
+
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

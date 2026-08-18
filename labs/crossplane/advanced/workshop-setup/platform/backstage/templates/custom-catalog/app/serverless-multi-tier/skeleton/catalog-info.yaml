@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: serverless-multi-tier-${{values.name}}
+  description: Serverless Multi Tier provisioned via Crossplane
+  annotations:
+    backstage.io/kubernetes-label-selector: 'entity-id=${{values.name}}'
+    backstage.io/kubernetes-namespace: ${{values.namespace}}
+    argocd/app-name: ${{values.name | dump}}
+  links:
+    - url: https://${{values.repoUrl}}?repo=${{values.name}}
+      title: Repo URL
+      icon: github
+spec:
+  owner: guest
+  lifecycle: experimental
+  type: service
