@@ -317,8 +317,6 @@ materially more than this workshop: hub plus four spokes across two regions mean
 planes and five VPCs. Deploy it in a fresh account, not on top of the three clusters from these
 labs, and read its README first: the prerequisites and the deploy order are its own.
 
-> The upstream copy carries account identifiers, generated credentials and hostnames from its
-> authors' development environment. Replace them with your own values before you deploy anything.
 > Its `patterns/kro-eks-cluster-mgmt/` directory is the entry point; the rest of the repository
 > covers other patterns you do not need for this.
 
