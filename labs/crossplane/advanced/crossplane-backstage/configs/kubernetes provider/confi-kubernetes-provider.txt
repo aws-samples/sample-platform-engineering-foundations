@@ -1,0 +1,36 @@
+10. Install the kubernetes provider [for the controlplane account]
+- Apply the provider `k apply -f crossplane/kubernetes-provider/kubernetes-provider.yaml`
+- Create the policy
+```shell
+aws iam create-policy --policy-name crossplane-kubernetes-provider-policy --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "eks:DescribeCluster"
+            ],
+            "Resource": "arn:aws:eks:us-east-1:123456789012:cluster/controlplane"
+        }
+    ]
+}'
+```
+- Create the iamserviceaccount
+```shell
+eksctl create iamserviceaccount \
+  --name crossplane-irsa-kubernetes-provider-sa \
+  --namespace crossplane-system \
+  --cluster controlplane \
+  --attach-policy-arn arn:aws:iam::123456789012:policy/crossplane-kubernetes-provider-policy  \
+  --approve
+```
+-  Patch the deployment
+```shell
+kubectl patch deployment provider-kubernetes-af58fcd0ba4b -n crossplane-system \
+  --type json \
+  -p '[{"op": "replace", "path": "/spec/template/spec/serviceAccountName", "value": "crossplane-irsa-kubernetes-provider-sa"}]'
+```
+- Restart the pod
+```shell
+kubectl delete pod -n crossplane-system -l pkg.crossplane.io/provider=provider-kubernetes
+```

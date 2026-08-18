@@ -1,0 +1,269 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xbucketwebhosts.bucket.platform.cloud
+spec:
+  group: bucket.platform.cloud
+  names:
+    kind: XBucketWebHost
+    plural: xbucketwebhosts
+  claimNames:
+    kind: BucketWebHost
+    plural: bucketwebhosts
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the bucket.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external 
+                        when this managed resource is deleted
+                        either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    name:
+                      description: >-
+                        The name of the bucket.
+                      type: string
+                    forceDestroy:
+                      description: >-
+                        It indicates all objects (including any locked objects) should be deleted from the bucket 
+                        when the bucket is destroyed so that the bucket can be destroyed without error. 
+                        These objects are not recoverable. 
+                        This only deletes objects when the bucket is destroyed, not when setting this parameter to true. 
+                        If setting this field in the same operation that would require replacing the bucket or destroying the bucket, 
+                        this flag will not work.
+                      type: boolean
+                    corsRule:
+                      description: >-
+                        Set of origins and methods (cross-origin access that you want to allow). See below. You can configure up to 100 rules.
+                      type: array
+                      default:
+                        - allowedHeaders:
+                            - "*"
+                          allowedMethods:
+                            - GET
+                            - HEAD
+                          allowedOrigins:
+                            - "*"
+                          exposeHeaders: []
+                          maxAgeSeconds: 3000
+                      items:
+                        type: object
+                        properties:
+                          allowedHeaders:
+                            description: >-
+                              Set of Headers that are specified in the Access-Control-Request-Headers header.
+                            type: array
+                            items:
+                              type: string
+                            default:
+                              - "*"
+                          allowedMethods:
+                            description: >-
+                              Set of HTTP methods that you allow the origin to execute. 
+                              Valid values are GET, PUT, HEAD, POST, and DELETE.
+                            type: array
+                            items:
+                              type: string
+                            default:
+                              - "GET"
+                              - "HEAD"
+                          allowedOrigins:
+                            description: >-
+                              Set of origins you want customers to be able to access the bucket from.
+                            type: array
+                            items:
+                              type: string
+                            default:
+                              - "*"
+                          exposeHeaders:
+                            description: >-
+                              Set of headers in the response that you want customers to be able to access 
+                              from their applications (for example, from a JavaScript XMLHttpRequest object).
+                            type: array
+                            items:
+                              type: string
+                            default: []
+                          maxAgeSeconds:
+                            description: >-
+                              Time in seconds that your browser is to cache the preflight response for the specified resource.
+                            type: number
+                            default: 3000
+                        required:
+                          - allowedHeaders
+                          - allowedMethods
+                          - allowedOrigins
+                          - maxAgeSeconds
+                    lifecycleConfiguration:
+                      description: >-
+                        Block to configure the lifecycle settings for the bucket
+                      type: object
+                      default:
+                        transitionStatus: Disabled
+                        transitionPrefix: transition-prefix-default
+                        nonCurrentVersionTransitionDays: 30
+                        standardTransitionDays: 30
+                        glacierTransitionDays: 60
+                        expirationStatus: Disabled
+                        expirationPrefix: expiration-prefix-default
+                        nonCurrentVersionExpirationDays: 90
+                        expirationDays: 90
+                      properties:
+                        transitionStatus:
+                          description: >-
+                            Whether the rule is currently being applied.
+                          type: string
+                          default: Disabled
+                          enum:
+                            - Enabled
+                            - Disabled
+                        transitionPrefix:
+                          description: >-
+                            Prefix identifying one or more objects regarding transition to which the rule applies. 
+                            Defaults to an empty string ("") if not specified.
+                          type: string
+                          default: transition-prefix-default
+                        nonCurrentVersionTransitionDays:
+                          description: >-
+                            Number of days an object is noncurrent before S3 can perform the transition.
+                          type: number
+                          default: 30
+                        standardTransitionDays:
+                          description: >-
+                            Number of days after creation when objects are transitioned to the specified StandardIA. 
+                            The value must be a positive integer.
+                          type: number
+                          default: 30
+                        glacierTransitionDays:
+                          description: >-
+                            Number of days after creation when objects are transitioned to the specified Glacier. 
+                            The value must be a positive integer.
+                          type: number
+                          default: 60
+                        expirationStatus:
+                          description: >-
+                            Whether the rule is currently being applied.
+                          type: string
+                          default: Disabled
+                          enum:
+                            - Enabled
+                            - Disabled
+                        expirationPrefix:
+                          description: >-
+                            Prefix identifying one or more objects regarding expiration to which the rule applies. 
+                            Defaults to an empty string ("") if not specified.
+                          type: string
+                          default: expiration-prefix-default
+                        nonCurrentVersionExpirationDays:
+                          description: >-
+                            Number of days an object is noncurrent before S3 can perform the expiration.
+                          type: number
+                          default: 90
+                        expirationDays:
+                          description: >-
+                            Number of days after creation when objects are expired 
+                            The value must be a positive integer.
+                          type: number
+                          default: 90
+                      required:
+                        - transitionStatus
+                        - transitionPrefix
+                        - nonCurrentVersionTransitionDays
+                        - expirationStatus
+                        - expirationPrefix
+                        - nonCurrentVersionExpirationDays
+                        - standardTransitionDays
+                        - glacierTransitionDays
+                        - expirationDays
+                    versioningStatus:
+                      description: >-
+                        Versioning state of the bucket. 
+                        Valid values: Enabled, Suspended, or Disabled. 
+                        Disabled should only be used when creating or importing resources that correspond 
+                        to unversioned S3 buckets.
+                        Default is Enabled.
+                      type: string
+                      default: Enabled
+                      enum:
+                        - Enabled
+                        - Disabled
+                    configAllowAccess:
+                      description: >-
+                        Configuration to allow other services to access this bucket.
+                      type: object
+                      properties:
+                        service:
+                          description: >-
+                            Service that will be allowed to access this bucket.
+                            Current options: CLOUDFRONT
+                          type: string
+                          enum:
+                            - CLOUDFRONT
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - name
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                Object with relevant information resulting from 
+                this composition to be used by other compositions.
+              properties:
+                bucket:
+                  type: object
+                  description: >-
+                    Output from created bucket
+                  properties:
+                    webhost:
+                      type: object
+                      description: >-
+                        Bucket with minimum settings
+                      properties:
+                        name:
+                          description: >-
+                            Name of the bucket.
+                          type: string
+                        domainName:
+                          description: >-
+                            Bucket domain name. Will be of format bucketname.s3.amazonaws.com.
+                          type: string
+                        regionalDomainName:
+                          description: >-
+                            The bucket region-specific domain name. 
+                            The bucket domain name including the region name.
+                          type: string
+                        loggingBucketName:
+                          description: >-
+                            Name of the bucket designated to store logs from wehost bucket.
+                          type: string

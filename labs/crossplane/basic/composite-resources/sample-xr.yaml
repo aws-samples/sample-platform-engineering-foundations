@@ -1,0 +1,37 @@
+apiVersion: awsblueprints.io/v1alpha1
+kind: XServerlessApp
+metadata:
+  name: my-serverless-app
+spec:
+  appName: my-serverless-app
+  region: us-east-1
+  environment: dev
+  vpcId: vpc-0c51c453190940bb9          # Replace with your VPC ID
+  subnetIds:                             # Replace with your private subnet IDs
+    - subnet-05f6a445502b7a084
+    - subnet-0c071cdf12fbbb83c
+
+  # RDS
+  databaseName: appdb
+  dbInstanceClass: db.t3.medium
+  dbEngineVersion: "17.4"
+  storageGB: 20
+
+  # Lambda
+  lambdaRuntime: python3.12
+  lambdaHandler: index.handler
+  lambdaS3Bucket: my-serverless-app-123456789012   # Replace with your S3 bucket
+  lambdaS3Key: lambda/backend.zip        # Replace with your package key
+  lambdaMemoryMB: 256
+  lambdaTimeoutSeconds: 30
+
+  # Frontend (S3 + CloudFront)
+  frontendEnabled: true
+  frontendDefaultRootObject: index.html
+  frontendPriceClass: PriceClass_100
+
+  # App Deployment (cluster-3)
+  appDeploymentEnabled: true
+  appImage: public.ecr.aws/nginx/nginx:1.27
+  appReplicas: 2
+  appPort: 80

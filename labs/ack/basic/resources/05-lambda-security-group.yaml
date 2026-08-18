@@ -1,0 +1,14 @@
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: serverless-app-lambda-sg
+  namespace: default
+spec:
+  description: "Security group for Lambda functions"
+  name: serverless-app-lambda-sg
+  vpcID: VPC_ID    # Replace with your VPC ID
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

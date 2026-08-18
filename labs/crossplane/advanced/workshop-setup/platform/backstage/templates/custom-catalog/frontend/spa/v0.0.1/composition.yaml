@@ -1,0 +1,297 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xspa.frontend.platform.cloud
+  labels:
+    frontend.platform.cloud/type: spa
+    spa.frontend.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: frontend.platform.cloud/v1alpha1
+    kind: XSpa
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+
+        resources:
+          - name: bucket-webhost
+            base:
+              apiVersion: bucket.platform.cloud/v1alpha1
+              kind: XBucketWebHost
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    bucket.platform.cloud/type: webhost
+                compositionRevisionSelector:
+                  matchLabels:
+                    webhost.bucket.platform.cloud/version: v0.0.1
+                parameters:
+                  forceDestroy: true
+                  versioningStatus: Enabled
+                  corsRule:
+                    - allowedHeaders:
+                        - "*"
+                      allowedMethods:
+                        - GET
+                        - HEAD
+                      allowedOrigins:
+                        - "*"
+                      exposeHeaders: []
+                      maxAgeSeconds: 3000
+                  lifecycleConfiguration:
+                    transitionStatus: Disabled
+                    transitionPrefix: default-transition
+                    nonCurrentVersionTransitionDays: 30
+                    standardTransitionDays: 30
+                    glacierTransitionDays: 60
+                    expirationStatus: Disabled
+                    expirationPrefix: default-expiration
+                    nonCurrentVersionExpirationDays: 90
+                    expirationDays: 90
+                  configAllowAccess:
+                    service: CLOUDFRONT
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.parameters.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.parameters.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.parameters.tags
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+              - fromFieldPath: status.bucket.webhost.regionalDomainName
+                toFieldPath: status.bucket.webhost.regionalDomainName
+                type: ToCompositeFieldPath
+              - fromFieldPath: status.bucket.webhost.name
+                toFieldPath: status.bucket.webhost.name
+                type: ToCompositeFieldPath
+
+          - name: s3-bucket-logging-for-cloudfront
+            base:
+              apiVersion: bucket.platform.cloud/v1alpha1
+              kind: XBucketLogging
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    bucket.platform.cloud/type: bucketlogging
+                compositionRevisionSelector:
+                  matchLabels:
+                    bucketlogging.bucket.platform.cloud/version: v0.0.1
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.parameters.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.parameters.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.parameters.tags
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-cloudfront"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.bucket.logging.bucketDomainName
+                toFieldPath: status.cloudfront.loggingBucketDomainName
+
+          - name: cdn-oac
+            base:
+              apiVersion: cloudfront.aws.upbound.io/v1beta1
+              kind: OriginAccessControl
+              spec:
+                forProvider:
+                  originAccessControlOriginType: s3
+                  signingBehavior: always
+                  signingProtocol: sigv4
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-oac"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-oac"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.description
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-oac"
+              - fromFieldPath: status.atProvider.id
+                toFieldPath: status.cloudfront.oac.id
+                type: ToCompositeFieldPath
+
+          - name: cdn-distribution
+            base:
+              apiVersion: cloudfront.aws.upbound.io/v1beta1
+              kind: Distribution
+              spec:
+                forProvider:
+                  enabled: true
+                  defaultCacheBehavior:
+                    - cachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized
+                      originRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf # CORS-S3Origin
+                      responseHeadersPolicyId: eaab4381-ed33-4a86-88ca-d9558dc6cd63 # CORS-with-preflight-and-SecurityHeadersPolicy
+                      allowedMethods:
+                        - HEAD
+                        - GET
+                        - OPTIONS
+                      cachedMethods:
+                        - HEAD
+                        - GET
+                        - OPTIONS
+                      targetOriginId: s3Origin
+                      viewerProtocolPolicy: redirect-to-https
+                  origin:
+                    - originId: s3Origin
+                      originPath: "/static"
+                  priceClass: PriceClass_200
+                  viewerCertificate:
+                    - cloudfrontDefaultCertificate: true
+                  loggingConfig:
+                    - prefix: "cloudfront"
+                  restrictions:
+                    - geoRestriction:
+                        - locations: []
+                          restrictionType: none
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.viewerCertificate
+                toFieldPath: spec.forProvider.viewerCertificate
+              - fromFieldPath: spec.parameters.aliases
+                toFieldPath: spec.forProvider.aliases
+              - fromFieldPath: spec.parameters.defaultRootObject
+                toFieldPath: spec.forProvider.defaultRootObject
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+              - fromFieldPath: status.cloudfront.loggingBucketDomainName
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.loggingConfig[0].bucket
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.bucket.webhost.regionalDomainName
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.origin[0].domainName
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.cloudfront.oac.id
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.origin[0].originAccessControlId
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.cloudfront.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.domainName
+                toFieldPath: status.cloudfront.domainName
+
+          - name: s3-bucket-policy-cloudfront
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPolicy
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - type: PatchSet
+                patchSetName: region
+              - type: PatchSet
+                patchSetName: deletionPolicy
+              - fromFieldPath: status.bucket.webhost.name
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.bucket
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |-
+                      {
+                        "Version": "2012-10-17",
+                        "Statement": {
+                            "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "cloudfront.amazonaws.com"
+                            },
+                            "Action": "s3:GetObject",
+                            "Resource": [
+                              "arn:aws:s3:::%[1]s",
+                              "arn:aws:s3:::%[1]s/*"
+                            ],
+                            "Condition": {
+                                "StringEquals": {
+                                    "AWS:SourceArn": "%[2]s"
+                                }
+                            }
+                        }
+                      }
+                  variables:
+                    - fromFieldPath: status.bucket.webhost.name
+                    - fromFieldPath: status.cloudfront.arn
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.policy
+                type: CombineFromComposite
+
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

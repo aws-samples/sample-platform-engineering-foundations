@@ -1,0 +1,29 @@
+apiVersion: app.platform.cloud/v1alpha1
+kind: FullStack
+metadata:
+  name: app027
+  namespace: default
+spec:
+  compositionSelector:
+    matchLabels:
+      app.platform.cloud/type: fullstack
+  parameters:
+    region: us-west-2
+    deletionPolicy: Delete
+    namespace: default
+    k8sProviderConfigRef:
+      name: default
+    providerConfigRef:
+      name: default
+    name: app027
+    securityGroupIds:
+      - sg-02636c496c06ad392
+    subnetIds:
+      - subnet-0849c416e38bfc467
+      - subnet-0498042dbb80d5507
+    backend:
+      image: public.ecr.aws/a6x6h2e2/psp-blog-api:0.0.4
+      port: "8083"
+      path: "/api/v1"
+    tags:
+      app: "psp"

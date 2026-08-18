@@ -1,0 +1,31 @@
+apiVersion: compute.platform.cloud/v1alpha1
+kind: LambdaFunction
+metadata:
+  name: lambda-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      compute.platform.cloud/type: lambdafunction
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-dataplane-psp-001-us-east-1-123456789012
+    name: lambda-001
+    handler: main.lambda_handler
+    packageType: Zip
+    runtime: python3.12
+    s3Bucket: psp-implementation-lambda-artifactory
+    s3Key: function.zip
+    timeout: 30
+    roleArn: arn:aws:iam::123456789012:role/psp-implementation-lambda-example
+    vpcConfig:
+      securityGroupIds:
+        - sg-01ea77219ab9fda3f
+      subnetIds:
+        - subnet-01e7a111e82d1705d
+        - subnet-08eb7e8be38c4ccf4
+    memorySize: 128
+    tags:
+      app: "psp"

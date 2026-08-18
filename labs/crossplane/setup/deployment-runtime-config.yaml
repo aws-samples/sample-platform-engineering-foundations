@@ -1,0 +1,19 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: default-drc
+  namespace: crossplane-system
+spec:
+  deploymentTemplate:
+    spec:
+      replicas: 1
+      selector: {}
+      template:
+        spec:
+          serviceAccountName: aws-providers-sa
+          containers:
+            - name: package-runtime
+              args:
+                - '--leader-election'
+                - '--poll=5m'
+                - '--max-reconcile-rate=1'

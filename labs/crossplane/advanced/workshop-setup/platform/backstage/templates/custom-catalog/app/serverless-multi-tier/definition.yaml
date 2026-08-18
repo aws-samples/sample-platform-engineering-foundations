@@ -1,0 +1,210 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xserverlessmultitiers.app.platform.cloud
+spec:
+  group: app.platform.cloud
+  names:
+    kind: XServerlessMultiTier
+    plural: xserverlessmultitiers
+  claimNames:
+    kind: ServerlessMultiTier
+    plural: serverlessmultitiers
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the bucket.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external 
+                        when this managed resource is deleted
+                        either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace to deploy the compute container.
+                    name:
+                      description: >-
+                        The name of the app.
+                      type: string
+                    lambda:
+                      description: >-
+                        Data of the lambda function.
+                      type: object
+                      properties:
+                        s3Bucket:
+                          type: string
+                          description: "S3 bucket containing the function's deployment package."
+                        s3Key:
+                          type: string
+                          description: "S3 key of the function's deployment package."
+                        size:
+                          type: string
+                          enum:
+                            - small
+                            - medium
+                            - large
+                            - xlarge
+                          description: >-
+                            The compute size category for the Lambda function.
+                            - `small`: 256 MB
+                            - `medium`: 1024 MB
+                            - `large`: 2048 MB
+                            - `xlarge`: 4096 MB
+                      required:
+                        - s3Bucket
+                        - s3Key
+                        - size
+                    api:
+                      description: >-
+                        Data of the api.
+                      type: object
+                      properties:
+                        openApiSpecification:
+                          description: >-
+                            Set the OpenAPI specification of the API to the value provided by this field.
+                          type: string
+                    database:
+                      description: >-
+                        Data of the database.
+                      type: object
+                      properties:
+                        attribute:
+                          description: >-
+                            Required for hashKey and/or rangeKey.
+                          items:
+                            properties:
+                              name:
+                                type: string
+                                description: >-
+                                  Name of the hashKey and/or rangeKey.
+                              type:
+                                enum:
+                                  - B #binary
+                                  - N #number
+                                  - S #string
+                                type: string
+                            required:
+                              - name
+                              - type
+                            type: object
+                          type: array
+                        hashKey:
+                          type: string
+                          description: >-
+                            Attribute to use as the hash (partition) key. Must also be defined as an attribute.
+                        rangeKey:
+                          type: string
+                          description: >-
+                            Name of the range key.
+                      required:
+                        - attribute
+                        - hashKey
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - name
+                    - database
+                    - lambda
+                    - api
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              properties:
+                database:
+                  type: object
+                  description: >-
+                    Object with relevant information resulting from
+                    the composite resource to be used by other resources.
+                  properties:
+                    users:
+                      type: object
+                      description: >-
+                        Object with relevant information resulting from
+                        the composite resource to be used by other resources.
+                      properties:
+                        name:
+                          type: string
+                          description: >-
+                            Name of the managed resource.
+                        arn:
+                          type: string
+                          description: >-
+                            ARN of the managed resource.
+                    posts:
+                      type: object
+                      description: >-
+                        Object with relevant information resulting from
+                        the composite resource to be used by other resources.
+                      properties:
+                        name:
+                          type: string
+                          description: >-
+                            Name of the managed resource.
+                        arn:
+                          type: string
+                          description: >-
+                            ARN of the managed resource.
+                lambda:
+                  type: object
+                  description: >-
+                    Object with relevant information resulting from
+                    the composite resource to be used by other resources.
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        ID of the managed resource.
+                    arn:
+                      type: string
+                      description: >-
+                        ARN of the managed resource.
+                    roleArn:
+                      type: string
+                      description: >-
+                        ARN of the lambda execution role.
+                api:
+                  type: object
+                  description: >-
+                    Object with relevant information resulting from
+                    the composite resource to be used by other resources.
+                  properties:
+                    accountId:
+                      type: string
+                      description: >-
+                        Number of the account that is provisioning the api and lambda
+                    parsedOpenApiSpecification:
+                      type: string
+                      description: >-
+                        OpenAPI specification of the API parsed to include lambda arn

@@ -1,0 +1,9 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: kubernetes-psp-us-east-1-123456789012
+spec:
+  credentials:
+    source: InjectedIdentity
+
+

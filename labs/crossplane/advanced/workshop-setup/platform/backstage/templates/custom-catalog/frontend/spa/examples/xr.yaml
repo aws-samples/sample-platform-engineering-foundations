@@ -1,0 +1,25 @@
+apiVersion: frontend.platform.cloud/v1alpha1
+kind: Spa
+metadata:
+  name: spa-008
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      frontend.platform.cloud/type: spa
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    name: spa-008
+    viewerCertificate:
+      - cloudfrontDefaultCertificate: true
+    aliases: []
+    # viewerCertificate:
+    #   - acmCertificateArn: arn:aws:acm:us-east-1:123456789012:certificate/EXAMPLE-CERT-ID
+    #     sslSupportMethod: sni-only
+    # aliases:
+    #   - "external.thebank.cloud"
+    tags:
+      app: "psp"

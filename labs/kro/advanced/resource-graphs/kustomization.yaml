@@ -1,0 +1,12 @@
+# Apply the building blocks first, then the app-level graph.
+# The app-level graph templates instances of the CRDs the building
+# blocks generate, so kro must process those RGDs first.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - database/dynamodb
+  - compute/lambda
+  - entrypoint/http-api
+  - frontend/static-site
+  - app/serverless-multi-tier

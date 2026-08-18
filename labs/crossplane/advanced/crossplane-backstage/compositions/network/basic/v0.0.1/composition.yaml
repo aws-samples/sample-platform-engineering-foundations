@@ -1,0 +1,683 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xnetworkbasic.network.platform.cloud
+  labels:
+    network.platform.cloud/type: networkbasic
+    networkbasic.network.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: network.platform.cloud/v1alpha1
+    kind: XNetworkBasic
+  mode: Pipeline
+  pipeline:
+    - step: configure-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+                policy:
+                  toFieldPath: ForceMergeObjectsAppendArrays
+
+        resources:
+          - name: vpc
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: VPC
+              metadata:
+                labels:
+                  network: eks-vpc
+              spec:
+                forProvider:
+                  enableDnsSupport: true
+                  enableDnsHostnames: true
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.vpcCidr"
+                toFieldPath: "spec.forProvider.cidrBlock"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-vpc"
+
+          - name: public-subnet-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              metadata:
+                labels:
+                  network: eks-public-subnet-a
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: true
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+                  tags:
+                    kubernetes.io/role/elb: "1"
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.publicSubnetA.cidrBlock"
+                toFieldPath: "spec.forProvider.cidrBlock"
+              - fromFieldPath: "spec.parameters.publicSubnetA.availabilityZone"
+                toFieldPath: "spec.forProvider.availabilityZone"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-a"
+
+          - name: public-subnet-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              metadata:
+                labels:
+                  network: eks-public-subnet-b
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: true
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+                  tags:
+                    kubernetes.io/role/elb: "1"
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.publicSubnetB.cidrBlock"
+                toFieldPath: "spec.forProvider.cidrBlock"
+              - fromFieldPath: "spec.parameters.publicSubnetB.availabilityZone"
+                toFieldPath: "spec.forProvider.availabilityZone"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-b"
+
+          - name: private-subnet-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              metadata:
+                labels:
+                  network: eks-private-subnet-a
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: false
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+                  tags:
+                    kubernetes.io/role/internal-elb: "1"
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.privateSubnetA.cidrBlock"
+                toFieldPath: "spec.forProvider.cidrBlock"
+              - fromFieldPath: "spec.parameters.privateSubnetA.availabilityZone"
+                toFieldPath: "spec.forProvider.availabilityZone"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-a"
+
+          - name: private-subnet-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Subnet
+              metadata:
+                labels:
+                  network: eks-private-subnet-b
+              spec:
+                forProvider:
+                  mapPublicIpOnLaunch: false
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+                  tags:
+                    kubernetes.io/role/internal-elb: "1"
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "spec.parameters.privateSubnetB.cidrBlock"
+                toFieldPath: "spec.forProvider.cidrBlock"
+              - fromFieldPath: "spec.parameters.privateSubnetB.availabilityZone"
+                toFieldPath: "spec.forProvider.availabilityZone"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-b"
+
+          - name: internet-gateway
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: InternetGateway
+              metadata:
+                labels:
+                  network: eks-internet-gateway
+              spec:
+                forProvider:
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-igw"
+
+          - name: nat-eip
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: EIP
+              metadata:
+                labels:
+                  network: eks-nat-eip
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-eip"
+
+          - name: nat-gateway
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: NATGateway
+              metadata:
+                labels:
+                  network: eks-nat-gateway
+              spec:
+                forProvider:
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-public-subnet-a
+                  allocationIdSelector:
+                    matchLabels:
+                      network: eks-nat-eip
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-natgtw"
+
+          - name: route-table-private
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTable
+              metadata:
+                labels:
+                  network: eks-route-table-private
+              spec:
+                forProvider:
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-private-rt"
+
+          - name: route-table-public
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTable
+              metadata:
+                labels:
+                  network: eks-route-table-public
+              spec:
+                forProvider:
+                  vpcIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-vpc
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: "metadata.name"
+                toFieldPath: spec.forProvider.tags.Name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-public-rt"
+
+          - name: route-public
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Route
+              metadata:
+                labels:
+                  network: eks-route-public
+              spec:
+                forProvider:
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-public
+                  destinationCidrBlock: "0.0.0.0/0"
+                  gatewayIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-internet-gateway
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          - name: subnet-association-public-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider:
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-public-subnet-a
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-public
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          - name: subnet-association-public-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider:
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-public-subnet-b
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-public
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          - name: route-private
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: Route
+              metadata:
+                labels:
+                  network: eks-route-private
+              spec:
+                forProvider:
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-private
+                  destinationCidrBlock: "0.0.0.0/0"
+                  natGatewayIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-nat-gateway
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          - name: subnet-association-private-a
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider:
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-private-subnet-a
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-private
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          - name: subnet-association-private-b
+            base:
+              apiVersion: ec2.aws.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider:
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-private-subnet-b
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      network: eks-route-table-private
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+
+          # - name: eks-control-plane-role
+          #   base:
+          #     apiVersion: iam.aws.upbound.io/v1beta1
+          #     kind: Role
+          #     metadata:
+          #       labels:
+          #         role: eks-control-plane-role
+          #     spec:
+          #       forProvider:
+          #         assumeRolePolicy: |
+          #           {
+          #             "Version": "2012-10-17",
+          #             "Statement": [
+          #               {
+          #                 "Effect": "Allow",
+          #                 "Principal": {
+          #                   "Service": "eks.amazonaws.com"
+          #                 },
+          #                 "Action": "sts:AssumeRole"
+          #               }
+          #             ]
+          #           }
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+          #     - patchSetName: deletionPolicy
+          #       type: PatchSet
+
+          # - name: eks-control-plane-role-policy
+          #   base:
+          #     apiVersion: iam.aws.upbound.io/v1beta1
+          #     kind: RolePolicyAttachment
+          #     spec:
+          #       forProvider:
+          #         roleSelector:
+          #           matchControllerRef: true
+          #           matchLabels:
+          #             role: eks-control-plane-role
+          #         policyArn: "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+          #     - patchSetName: deletionPolicy
+          #       type: PatchSet
+
+          # - name: eks-role
+          #   base:
+          #     apiVersion: iam.aws.upbound.io/v1beta1
+          #     kind: Role
+          #     metadata:
+          #       labels:
+          #         role: eks-role
+          #     spec:
+          #       forProvider:
+          #         assumeRolePolicy: |
+          #           {
+          #             "Version": "2012-10-17",
+          #             "Statement": [
+          #               {
+          #                 "Effect": "Allow",
+          #                 "Principal": {
+          #                   "Service": "eks.amazonaws.com"
+          #                 },
+          #                 "Action": "sts:AssumeRole"
+          #               }
+          #             ]
+          #           }
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+          #     - patchSetName: deletionPolicy
+          #       type: PatchSet
+
+          # - name: eks-nodegroup-role
+          #   base:
+          #     apiVersion: iam.aws.upbound.io/v1beta1
+          #     kind: Role
+          #     metadata:
+          #       labels:
+          #         role: eks-nodegroup-role
+          #     spec:
+          #       forProvider:
+          #         assumeRolePolicy: |
+          #           {
+          #             "Version": "2012-10-17",
+          #             "Statement": [
+          #               {
+          #                 "Effect": "Allow",
+          #                 "Principal": {
+          #                   "Service": "ec2.amazonaws.com"
+          #                 },
+          #                 "Action": "sts:AssumeRole"
+          #               }
+          #             ]
+          #           }
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+
+          # - name: eks-nodegroup-role-policy
+          #   base:
+          #     apiVersion: iam.aws.upbound.io/v1beta1
+          #     kind: RolePolicyAttachment
+          #     spec:
+          #       forProvider:
+          #         roleSelector:
+          #           matchControllerRef: true
+          #           matchLabels:
+          #             role: eks-nodegroup-role
+          #         policyArn: "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+
+          # - name: eks-cluster
+          #   base:
+          #     apiVersion: eks.aws.upbound.io/v1beta1
+          #     kind: Cluster
+          #     spec:
+          #       forProvider:
+          #         roleArnSelector:
+          #           matchControllerRef: true
+          #           matchLabels:
+          #             role: eks-role
+          #         vpcConfig:
+          #           - subnetIdSelector:
+          #               matchControllerRef: true
+          #               matchLabels:
+          #                 network: eks-private-subnet
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+          #     - patchSetName: deletionPolicy
+          #       type: PatchSet
+          #     - patchSetName: region
+          #       type: PatchSet
+          #     - fromFieldPath: "spec.parameters.clusterVersion"
+          #       toFieldPath: "spec.forProvider.version"
+
+          # - name: nodegroup
+          #   base:
+          #     apiVersion: eks.aws.upbound.io/v1beta1
+          #     kind: NodeGroup
+          #     spec:
+          #       forProvider:
+          #         nodeRoleArnSelector:
+          #           matchControllerRef: true
+          #           matchLabels:
+          #             role: eks-nodegroup
+          #         subnetIdSelector:
+          #           matchControllerRef: true
+          #           matchLabels:
+          #             network: eks-private-subnet
+          #   patches:
+          #     - patchSetName: providerConfigRef
+          #       type: PatchSet
+          #     - patchSetName: deletionPolicy
+          #       type: PatchSet
+          #     - patchSetName: region
+          #       type: PatchSet
+          #     - fromFieldPath: "eks-cluster.metadata.name"
+          #       toFieldPath: "spec.forProvider.clusterName"
+          #     - fromFieldPath: "spec.parameters.nodeCount"
+          #       toFieldPath: "spec.forProvider.scalingConfig[0].desiredSize"
+          #     - fromFieldPath: "spec.parameters.minNodeCount"
+          #       toFieldPath: "spec.forProvider.scalingConfig[0].minSize"
+          #     - fromFieldPath: "spec.parameters.maxNodeCount"
+          #       toFieldPath: "spec.forProvider.scalingConfig[0].maxSize"
+          #     - fromFieldPath: "spec.parameters.nodeInstanceType"
+          #       toFieldPath: "spec.forProvider.instanceTypes[0]"
+
+    - step: auto-detect-ready
+      functionRef:
+        name: function-auto-ready

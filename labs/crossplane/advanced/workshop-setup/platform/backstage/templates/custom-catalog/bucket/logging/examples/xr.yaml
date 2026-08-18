@@ -1,0 +1,17 @@
+apiVersion: bucket.platform.cloud/v1alpha1
+kind: BucketLogging
+metadata:
+  name: bucket-logging-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      bucket.platform.cloud/type: bucketlogging
+  parameters:
+    region: us-east-1
+    deletionPolicy: Delete
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    name: bucket-logging-001-aduouas8duasduas6
+    tags:
+      app: "psp"

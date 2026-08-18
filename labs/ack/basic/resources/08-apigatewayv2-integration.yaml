@@ -1,0 +1,11 @@
+apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
+kind: Integration
+metadata:
+  name: serverless-app-lambda-integration
+  namespace: default
+spec:
+  apiID: API_ID    # Replace with the API Gateway ID from step 07
+  integrationType: AWS_PROXY
+  integrationMethod: POST
+  integrationURI: LAMBDA_FUNCTION_ARN    # Replace with the Lambda Function ARN from step 06
+  payloadFormatVersion: "2.0"

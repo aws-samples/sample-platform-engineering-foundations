@@ -1,0 +1,345 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapirest.apigateway.entrypoint.platform.cloud
+  labels:
+    apigateway.entrypoint.platform.cloud/type: apirest
+    apirest.apigateway.entrypoint.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: apigateway.entrypoint.platform.cloud/v1alpha1
+    kind: XApiRest
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+
+        resources:
+          - name: restapi
+            base:
+              apiVersion: apigateway.aws.upbound.io/v1beta1
+              kind: RestAPI
+              metadata:
+                labels:
+                  resource: RestAPI
+              spec:
+                forProvider:
+                  endpointConfiguration:
+                    - types:
+                        - REGIONAL
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - toFieldPath: spec.forProvider.name
+                type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.tags.Name
+                policy:
+                  toFieldPath: MergeObjects
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.apiDescription
+                toFieldPath: spec.forProvider.description
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.openApiSpecification
+                toFieldPath: spec.forProvider.body
+                policy:
+                  fromFieldPath: Required
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.endpointType
+                toFieldPath: spec.forProvider.endpointConfiguration[0].types[0]
+          - name: apigw-role
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                labels:
+                  resource: roleApiGateway
+              spec:
+                forProvider:
+                  assumeRolePolicy: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Principal": {
+                            "Service": "apigateway.amazonaws.com"
+                          },
+                          "Action": "sts:AssumeRole"
+                        }
+                      ]
+                    }
+                  path: "/"
+                  managedPolicyArns:
+                    - >-
+                      arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+            patches:
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - string:
+                      fmt: "%s-apigw-role"
+                      type: Format
+                    type: string
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.tags.Name
+                policy:
+                  toFieldPath: MergeObjects
+                transforms:
+                  - string:
+                      fmt: "%s-apigw-role"
+                      type: Format
+                    type: string
+
+          - name: api-deployment
+            base:
+              apiVersion: apigateway.aws.upbound.io/v1beta1
+              kind: Deployment
+              metadata:
+                labels:
+                  resource: deploymentApiGateway
+              spec:
+                forProvider:
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: RestAPI
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-deployment"
+
+          - name: api-stage
+            base:
+              apiVersion: apigateway.aws.upbound.io/v1beta1
+              kind: Stage
+              metadata:
+                labels:
+                  resource: RestAPIStage
+              spec:
+                forProvider:
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: RestAPI
+                  deploymentIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: deploymentApiGateway
+                  accessLogSettings:
+                    - format: >-
+                        {
+                        "requestId":"$context.requestId",
+                        "ip": "$context.identity.sourceIp",
+                        "requestTime":"$context.requestTime",
+                        "httpMethod":"$context.httpMethod",
+                        "routeKey":"$context.routeKey",
+                        "status":"$context.status",
+                        "protocol":"$context.protocol",
+                        "integrationStatus": "$context.integrationStatus",
+                        "integrationLatency": "$context.integrationLatency",
+                        "responseLength":"$context.responseLength"
+                        }
+                  xrayTracingEnabled: true
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.stageName
+                toFieldPath: spec.forProvider.stageName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-stage"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.tags.Name
+                policy:
+                  toFieldPath: MergeObjects
+                transforms:
+                  - string:
+                      fmt: "%s-stage"
+                      type: Format
+                    type: string
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.accessLogsGroupArn
+                toFieldPath: spec.forProvider.accessLogSettings[0].destinationArn
+                policy:
+                  fromFieldPath: Required
+          - name: api-access-logs-group
+            base:
+              apiVersion: cloudwatchlogs.aws.upbound.io/v1beta1
+              kind: Group
+              metadata:
+                labels:
+                  resource: logGroupApiGateway
+              spec:
+                forProvider:
+                  retentionInDays: 1
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                policy:
+                  fromFieldPath: Required
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-group"
+
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.tags.Name
+                policy:
+                  toFieldPath: MergeObjects
+                  fromFieldPath: Required
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-group"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.logRetentionPeriod
+                toFieldPath: spec.forProvider.retentionInDays
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.accessLogsGroupArn
+
+          - name: apigw-logging-account
+            base:
+              apiVersion: apigateway.aws.upbound.io/v1beta1
+              kind: Account
+              spec:
+                forProvider:
+                  cloudwatchRoleArnSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: roleApiGateway
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-logging-account"
+
+          - name: api-method-settings
+            base:
+              apiVersion: apigateway.aws.upbound.io/v1beta1
+              kind: MethodSettings
+              spec:
+                forProvider:
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: RestAPI
+                  stageNameSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: RestAPIStage
+                  methodPath: "*/*"
+                  settings:
+                    - metricsEnabled: true
+                      loggingLevel: "INFO"
+                      dataTraceEnabled: true
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-method-settings"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.logLevel
+                toFieldPath: spec.forProvider.settings[0].loggingLevel
+
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

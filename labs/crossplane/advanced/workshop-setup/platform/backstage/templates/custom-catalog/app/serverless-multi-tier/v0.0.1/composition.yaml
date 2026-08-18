@@ -1,0 +1,467 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xserverlessmultitier.app.platform.cloud
+  labels:
+    app.platform.cloud/type: serverlessmultitier
+    serverlessmultitier.app.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: app.platform.cloud/v1alpha1
+    kind: XServerlessMultiTier
+  mode: Pipeline
+  pipeline:
+    - step: parse-and-extract
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{ $xr := getCompositeResource . }}
+            {{ $lambdaArn := dig "status" "lambda" "arn" nil $xr }}
+            ---
+            {{ if ne $lambdaArn nil }}
+              {{ $region := $xr.spec.parameters.region }} 
+              {{ $accountId := print (index (split ":" (printf "%s" $lambdaArn)) "_4") }}
+              {{ $openApiSpecification := $xr.spec.parameters.api.openApiSpecification }} 
+              {{ $parsedOpenApiSpecificationLambda := $openApiSpecification | replace "##lambda_arn##" $lambdaArn }}
+              {{ $parsedOpenApiSpecification := $parsedOpenApiSpecificationLambda | replace "##region##" $region | toYaml }}
+              apiVersion: {{ $xr.apiVersion }}
+              kind: {{ $xr.kind }}
+              status:
+                api:
+                  parsedOpenApiSpecification: {{ $parsedOpenApiSpecification }}
+                  accountId: "{{ $accountId }}"
+            {{ end }}
+
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.parameters.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.parameters.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+          - name: k8sProviderConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.k8sProviderConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.parameters.tags
+        resources:
+          - name: database-users
+            base:
+              apiVersion: database.platform.cloud/v1alpha1
+              kind: XDynamoDBTable
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    database.platform.cloud/type: dynamodbtable
+                parameters:
+                  billingMode: PAY_PER_REQUEST
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-users-table"
+              - fromFieldPath: spec.parameters.database.attribute
+                toFieldPath: spec.parameters.attribute
+              - fromFieldPath: spec.parameters.database.hashKey
+                toFieldPath: spec.parameters.hashKey
+              - fromFieldPath: spec.parameters.database.rangeKey
+                toFieldPath: spec.parameters.rangeKey
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.arn
+                toFieldPath: status.database.users.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.name
+                toFieldPath: status.database.users.name
+
+          - name: database-posts #database DynamoDB
+            base:
+              apiVersion: database.platform.cloud/v1alpha1
+              kind: XDynamoDBTable
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    database.platform.cloud/type: dynamodbtable #other composition to create dynamo
+                parameters:
+                  billingMode: PAY_PER_REQUEST #billingmode
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-posts-table"
+              - fromFieldPath: spec.parameters.database.attribute
+                toFieldPath: spec.parameters.attribute
+              - fromFieldPath: spec.parameters.database.hashKey
+                toFieldPath: spec.parameters.hashKey
+              - fromFieldPath: spec.parameters.database.rangeKey
+                toFieldPath: spec.parameters.rangeKey
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.arn
+                toFieldPath: status.database.posts.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.name
+                toFieldPath: status.database.posts.name
+
+          - name: lambda-role #lambda role
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                labels:
+                  role: lambdaRole
+              spec:
+                forProvider:
+                  assumeRolePolicy: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Principal": {
+                            "Service": "lambda.amazonaws.com"
+                          },
+                          "Action": "sts:AssumeRole"
+                        }
+                      ]
+                    }
+                  tags:
+                    Name: lambda-execution-role
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-lambda-role"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.lambda.roleArn
+
+          - name: lambda-basic-execution-policy
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                forProvider:
+                  policyArn: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      role: lambdaRole
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+
+          - name: lambda-dynamodb-full-access-policy
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: Policy
+              metadata:
+                labels:
+                  policy: dynamodbFullAccessPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |-
+                      {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                          {
+                            "Effect": "Allow",
+                            "Action": [
+                              "dynamodb:GetItem",
+                              "dynamodb:BatchGetItem",
+                              "dynamodb:Scan",
+                              "dynamodb:Query",
+                              "dynamodb:PutItem",
+                              "dynamodb:UpdateItem",
+                              "dynamodb:DeleteItem",
+                              "dynamodb:BatchWriteItem"
+                            ],
+                            "Resource": [
+                              "%[1]s",
+                              "%[1]s/index/*",
+                              "%[2]s",
+                              "%[2]s/index/*"
+                            ]
+                          }
+                        ]
+                      }
+                  variables:
+                    - fromFieldPath: status.database.users.arn
+                    - fromFieldPath: status.database.posts.arn
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.policy
+                type: CombineFromComposite
+
+          - name: lambda-dynamodb-full-access-policy-attach
+            base:
+              apiVersion: iam.aws.upbound.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                forProvider:
+                  policyArnSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      policy: dynamodbFullAccessPolicy
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      role: lambdaRole
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+
+          - name: lambda # lambda creation
+            base:
+              apiVersion: compute.platform.cloud/v1alpha1
+              kind: XLambdaFunction
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    compute.platform.cloud/type: lambdafunction
+                parameters:
+                  handler: main.lambda_handler
+                  packageType: Zip
+                  runtime: python3.12 #runtime
+                  timeout: 30
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-lambda-function"
+              - fromFieldPath: spec.parameters.lambda.s3Bucket
+                toFieldPath: spec.parameters.s3Bucket
+              - fromFieldPath: spec.parameters.lambda.s3Key
+                toFieldPath: spec.parameters.s3Key
+              - fromFieldPath: spec.parameters.lambda.size
+                toFieldPath: spec.parameters.memorySize
+                transforms:
+                  - type: map
+                    map:
+                      small: 256 # lambda size
+                      medium: 1024
+                      large: 2048
+                      xlarge: 4096
+              - fromFieldPath: status.lambda.roleArn
+                toFieldPath: spec.parameters.roleArn
+                policy:
+                  fromFieldPath: Required
+              - fromFieldPath: status.database.users.name
+                toFieldPath: spec.parameters.variables.DYNAMO_DB_USERS_TABLE_NAME
+                policy:
+                  fromFieldPath: Required
+              - fromFieldPath: status.database.users.name
+                toFieldPath: spec.parameters.variables.DYNAMO_DB_USERS_TABLE_ARN
+                policy:
+                  fromFieldPath: Required
+              - fromFieldPath: status.database.posts.name
+                toFieldPath: spec.parameters.variables.DYNAMO_DB_POSTS_TABLE_NAME
+                policy:
+                  fromFieldPath: Required
+              - fromFieldPath: status.database.posts.name
+                toFieldPath: spec.parameters.variables.DYNAMO_DB_POSTS_TABLE_ARN
+                policy:
+                  fromFieldPath: Required
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.lambdaArn
+                toFieldPath: status.lambda.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.lambdaName
+                toFieldPath: status.lambda.name
+
+          - name: api
+            base:
+              apiVersion: apigateway.entrypoint.platform.cloud/v1alpha1
+              kind: XApiRest
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    apigateway.entrypoint.platform.cloud/type: apirest
+                parameters:
+                  endpointType: REGIONAL
+                  stageName: dev
+                  logRetentionPeriod: 15
+                  logLevel: INFO
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rest-api"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.apiDescription
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rest-api"
+              - fromFieldPath: status.api.parsedOpenApiSpecification
+                toFieldPath: spec.parameters.openApiSpecification
+                policy:
+                  fromFieldPath: Required
+
+          - name: lambda-permission
+            base:
+              apiVersion: lambda.aws.upbound.io/v1beta1
+              kind: Permission
+              spec:
+                forProvider:
+                  action: lambda:InvokeFunction
+                  principal: apigateway.amazonaws.com
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.lambda.name
+                toFieldPath: spec.forProvider.functionNameRef.name
+                policy:
+                  fromFieldPath: Required
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |-
+                      arn:aws:execute-api:%[1]s:%[2]s:*/*/*/*
+                  variables:
+                    - fromFieldPath: spec.parameters.region
+                    - fromFieldPath: status.api.accountId
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.sourceArn
+                type: CombineFromComposite
+
+          - name: frontend
+            base:
+              apiVersion: frontend.platform.cloud/v1alpha1
+              kind: XSpa
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    frontend.platform.cloud/type: spa
+                parameters:
+                  viewerCertificate:
+                    - cloudfrontDefaultCertificate: true
+                  aliases: []
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-frontend"
+
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready

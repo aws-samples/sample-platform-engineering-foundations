@@ -1,0 +1,41 @@
+apiVersion: cluster.platform.cloud/v1alpha1
+kind: EksBasic
+metadata:
+  name: dataplane-004
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      cluster.platform.cloud/type: eksbasic
+  parameters:
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    deletionPolicy: Delete
+    region: "us-east-1"
+    clusterVersion: "1.32"
+    namespace: dev
+    acronym: psp01
+    accountId: "123456789012"
+    vpcId: vpc-03cc42ba72b1b7795
+    subnetIds:
+      - subnet-078434ccd3a966d86
+      - subnet-05e10deb0dee13c35
+    securityGroup:
+      ingress:
+        fromPort: -1
+        toPort: -1
+        self: true
+        protocol: all
+      egress:
+        cidrs:
+          - 0.0.0.0/0
+        fromPort: -1
+        toPort: -1
+        self: false
+        protocol: all
+    nodeCount: 3
+    minNodeCount: 1
+    maxNodeCount: 5
+    nodeInstanceType: "m5.xlarge"
+    tags:
+      app: "psp"

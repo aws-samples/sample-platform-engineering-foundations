@@ -1,0 +1,24 @@
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBInstance
+metadata:
+  name: serverless-app-rds
+  namespace: default
+spec:
+  dbInstanceIdentifier: serverless-app-rds
+  dbInstanceClass: db.t3.medium
+  engine: postgres
+  engineVersion: "17.4"
+  masterUsername: postgres
+  manageMasterUserPassword: true
+  allocatedStorage: 20
+  dbName: appdb
+  dbSubnetGroupName: serverless-app-rds-subnet-group
+  vpcSecurityGroupIDs:
+    - SG_ID    # Replace with the Security Group ID from step 02
+  publiclyAccessible: false
+  storageEncrypted: true
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

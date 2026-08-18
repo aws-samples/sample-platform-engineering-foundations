@@ -1,0 +1,166 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xpostgresql.database.platform.cloud
+  labels:
+    database.platform.cloud/type: postgresql
+    postgresql.database.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: database.platform.cloud/v1alpha1
+    kind: XPostgresql
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+
+        resources:
+          - name: rds-postgresql-subnet-group
+            base:
+              apiVersion: rds.aws.upbound.io/v1beta1
+              kind: SubnetGroup
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.subnetIds
+                toFieldPath: spec.forProvider.subnetIds
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-group"
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: spec.forProvider.description
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-subnet-group"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.database.subnetGroup.name
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.vpcId
+                toFieldPath: status.database.subnetGroup.vpcId
+
+          - name: rds-postgresql-instance
+            base:
+              apiVersion: rds.aws.upbound.io/v1beta2
+              kind: Instance
+              spec:
+                forProvider:
+                  autoGeneratePassword: true
+                  autoMinorVersionUpgrade: true
+                  engine: postgres
+                  engineVersion: "16.6"
+                  publiclyAccessible: false
+                  skipFinalSnapshot: true
+                  storageEncrypted: true
+                  storageType: gp2
+                  passwordSecretRef:
+                    key: password
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.database.subnetGroup.name
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.dbSubnetGroupName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.securityGroupIds
+                toFieldPath: spec.forProvider.vpcSecurityGroupIds
+              - fromFieldPath: spec.parameters.instanceClass
+                toFieldPath: spec.forProvider.instanceClass
+              - fromFieldPath: spec.parameters.storage
+                toFieldPath: spec.forProvider.allocatedStorage
+              - fromFieldPath: spec.parameters.backupRetentionPeriod
+                toFieldPath: spec.forProvider.backupRetentionPeriod
+              - fromFieldPath: spec.parameters.dbName
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.dbName
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: metadata.name
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: spec.forProvider.identifier
+              - fromFieldPath: spec.parameters.username
+                toFieldPath: spec.forProvider.username
+              - fromFieldPath: spec.parameters.port
+                toFieldPath: spec.forProvider.port
+              - fromFieldPath: spec.parameters.secretNamespace
+                toFieldPath: spec.writeConnectionSecretToRef.namespace
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: spec.writeConnectionSecretToRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-connection-data"
+              - fromFieldPath: spec.parameters.secretNamespace
+                toFieldPath: spec.forProvider.passwordSecretRef.namespace
+              - fromFieldPath: spec.parameters.dbName
+                toFieldPath: spec.forProvider.passwordSecretRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-password-data"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.username
+                toFieldPath: status.database.username
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.port
+                toFieldPath: status.database.port
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.dbName
+                toFieldPath: status.database.dbName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.address
+                toFieldPath: status.database.address
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.masterUserSecret[0].secretArn
+                toFieldPath: status.database.masterUserSecretArn
+
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

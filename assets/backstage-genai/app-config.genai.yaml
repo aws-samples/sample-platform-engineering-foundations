@@ -1,0 +1,63 @@
+# app-config.genai.yaml
+# AWS GenAI plugin configuration for the PSP Workshop LATAM.
+#
+# This file is loaded AS AN ADDITIONAL LAYER on top of the app-config.yaml
+# produced by the scaffold:
+#   node packages/backend --config app-config.yaml --config app-config.genai.yaml
+#
+# Schema as defined by the official packages:
+#   @aws/genai-plugin-for-backstage-backend          -> genai.agents.<name>.{description,prompt,actions,tools}
+#   @aws/genai-plugin-langgraph-agent-for-backstage  -> genai.agents.<name>.langgraph.{messagesMaxTokens,bedrock.{region,modelId}}
+# Reference: https://github.com/awslabs/backstage-plugins-for-aws/tree/main/plugins/genai
+
+backend:
+  actions:
+    # Enables the action registry for the plugins below. Without this the agent
+    # gets no tools at all and answers only from the model's own knowledge.
+    #
+    # NOTE: in Backstage, lists in config are REPLACED by the outermost layer,
+    # never concatenated. That is why we repeat here the sources the scaffold
+    # app-config.yaml already ships (auth, catalog, scaffolder) and only add
+    # `aws-genai`. Omitting the three would break the native actions.
+    pluginSources:
+      - auth
+      - catalog
+      - scaffolder
+      - aws-genai
+
+genai:
+  # Registers the "core" actions (catalog and TechDocs) in the action registry.
+  registerCoreActions: true
+
+  agents:
+    # The agent name matches the frontend URL: /assistant/general
+    general:
+      description: PSP Workshop platform assistant
+      prompt: >
+        You are a platform engineering expert assistant embedded in the
+        Backstage portal of this workshop.
+
+        Answer concisely, to the point, and in well formed Markdown.
+
+        When the question involves a component, system, API, group or resource,
+        query the Backstage catalog before answering and cite the entities you
+        used in the kind/namespace/name format.
+
+        Never make up catalog data: if the search returns no results, say what
+        was searched for and suggest a refinement.
+
+        The current user is {username}.
+      actions:
+        - get-catalog-entity
+        - search-catalog
+        - search-techdocs
+      langgraph:
+        # Tuned to the context window of the chosen model; prunes history by
+        # tokens.
+        messagesMaxTokens: 150000
+        bedrock:
+          # Cross-region inference profile (`us.` prefix). The plain foundation
+          # model id fails on-demand invocation with ValidationException.
+          # Validated alternative: us.anthropic.claude-sonnet-4-20250514-v1:0
+          modelId: us.anthropic.claude-haiku-4-5-20251001-v1:0
+          region: us-east-1

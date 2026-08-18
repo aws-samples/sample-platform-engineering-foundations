@@ -1,0 +1,30 @@
+apiVersion: app.platform.cloud/v1alpha1
+kind: FullStack
+metadata:
+  name: ${{ values.name }}
+  namespace: default
+spec:
+  compositionSelector:
+    matchLabels:
+      app.platform.cloud/type: fullstack
+  parameters:
+    region: us-west-2
+    deletionPolicy: Delete
+    namespace: default
+    k8sProviderConfigRef:
+      name: kubernetes-psp-us-east-1-123456789012
+    providerConfigRef:
+      name: default
+    name: ${{ values.name }}
+    securityGroupIds:
+      - sg-073079ad8949c3926
+    subnetIds:
+      - subnet-068d9c1833b7b7e3d
+      - subnet-02fd73371712fc3d1
+    backend:
+      image: ${{ values.image }}
+      port: "${{ values.port }}"
+      path: "${{ values.path }}"
+    tags:
+      app: "psp"
+

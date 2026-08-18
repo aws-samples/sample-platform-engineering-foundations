@@ -1,0 +1,384 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xcontainers.compute.platform.cloud
+spec:
+  group: compute.platform.cloud
+  names:
+    kind: XContainer
+    plural: xcontainers
+  claimNames:
+    kind: Container
+    plural: containers
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the compute container.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace to deploy the compute container.
+                    name:
+                      description: >-
+                        The name of the compute container.
+                        It is used to prefix for all resources created.
+                      type: string
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external 
+                        when this managed resource is deleted
+                        either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    deployment:
+                      type: object
+                      description: >-
+                        A Deployment manages a set of Pods to run an application, usually one that doesn't maintain state.
+                        Provide declarative updates for Pods and ReplicaSets.
+                      properties:
+                        replicas:
+                          description: >-
+                            Number of desired pods. 
+                            This is a pointer to distinguish between explicit zero and not specified. Defaults to 1.
+                          type: number
+                          default: 1
+                        revisionHistoryLimit:
+                          description: >-
+                            The number of old ReplicaSets to retain to allow rollback. 
+                            This is a pointer to distinguish between explicit zero and not specified. Defaults to 10.
+                          type: number
+                          default: 10
+                        containers:
+                          description: >-
+                            List of containers belonging to the pod. 
+                            Containers cannot currently be added or removed. 
+                            There must be at least one container in a Pod.
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                description: >-
+                                  The name of container
+                                type: string
+                              ports:
+                                description: >-
+                                  List of ports to expose from the container. 
+                                  Exposing a port here gives the system additional information about the network connections a container uses.
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    name:
+                                      description: >-
+                                        If specified, this must be an IANA_SVC_NAME and unique within the pod. 
+                                        Each named port in a pod must have a unique name. 
+                                        Name for the port that can be referred to by services.
+                                      type: string
+                                    containerPort:
+                                      description: >-
+                                        Number of port to expose on the pod's IP address. This must be a valid port number, 0 < x < 65536.
+                                      type: number
+                                    protocol:
+                                      description: >-
+                                        The IP protocol for this port. Supports TCP, UDP, and SCTP. Default is TCP. 
+                                        Possible enum values:
+                                          TCP is the TCP protocol.
+                                          UDP is the UDP protocol.
+                                      type: string
+                                      enum:
+                                        - TCP
+                                        - UDP
+                                      default: TCP
+                                  required:
+                                    - containerPort
+                                    - protocol
+                              resources:
+                                description: >-
+                                  Compute Resources required by this container.
+                                type: object
+                                properties:
+                                  limits:
+                                    description: >-
+                                      Limits describes the maximum amount of compute resources allowed.
+                                    type: object
+                                    properties:
+                                      memory:
+                                        description: >-
+                                          Limits for memory are measured in bytes. 
+                                          You can express memory as a plain integer or as a fixed-point number using one of these quantity suffixes: 
+                                            E, P, T, G, M, k. 
+                                          You can also use the power-of-two equivalents: Ei, Pi, Ti, Gi, Mi, Ki.
+                                        type: string
+                                      cpu:
+                                        description: >-
+                                          Limits for CPU resources are measured in cpu units. 
+                                          In Kubernetes, 1 CPU unit is equivalent to 1 physical CPU core, or 1 virtual core.
+                                        type: string
+                                    required:
+                                      - memory
+                                      - cpu
+                                  requests:
+                                    description: >-
+                                      Requests describes the minimum amount of compute resources required. 
+                                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified.
+                                      Otherwise to an implementation-defined value.
+                                    type: object
+                                    properties:
+                                      memory:
+                                        description: >-
+                                          Requests for memory are measured in bytes. 
+                                          You can express memory as a plain integer or as a fixed-point number using one of these quantity suffixes: 
+                                            E, P, T, G, M, k. 
+                                          You can also use the power-of-two equivalents: Ei, Pi, Ti, Gi, Mi, Ki.
+                                        type: string
+                                      cpu:
+                                        description: >-
+                                          Requests for CPU resources are measured in cpu units. 
+                                          In Kubernetes, 1 CPU unit is equivalent to 1 physical CPU core, or 1 virtual core.
+                                        type: string
+                                    required:
+                                      - memory
+                                      - cpu
+                              image:
+                                description: >-
+                                  The container image represents binary data that encapsulates an application and all dependencies.
+                                type: string
+                              args:
+                                description: >-
+                                  List of arguments to pass to the container
+                                type: array
+                                items:
+                                  type: string
+                              env:
+                                description: >-
+                                  List of environment variables to set in the container.
+                                items:
+                                  type: object
+                                  properties:
+                                    name:
+                                      type: string
+                                    value:
+                                      type: string
+                                    valueFrom:
+                                      type: object
+                                      properties:
+                                        secretKeyRef:
+                                          type: object
+                                          properties:
+                                            name:
+                                              type: string
+                                            key:
+                                              type: string
+                                          required:
+                                            - name
+                                            - key
+                                      required:
+                                        - secretKeyRef
+                                  required:
+                                    - name
+                                type: array
+                            required:
+                              - name
+                              - ports
+                              - image
+                      required:
+                        - containers
+                    service:
+                      description: >-
+                        Configuration of the method for exposing a network application 
+                        that is running as one or more Pods in your cluster
+                      type: object
+                      properties:
+                        name:
+                          description: >-
+                            The name of a Service object must be a valid RFC 1035 label name.
+                          type: string
+                        annotations:
+                          description: >-
+                            Ingress frequently uses annotations to configure options 
+                            on the service
+                          type: object
+                          additionalProperties:
+                            type: string
+                        type:
+                          description: >-
+                            The name of a Service object must be a valid RFC 1035 label name.
+                          type: string
+                          enum:
+                            - ClusterIP
+                            - NodePort
+                            - LoadBalancer
+                            - ExternalName
+                        ports:
+                          description: >-
+                            The list of ServicePort that are exposed by this service.
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                description: >-
+                                  The name of this port within the service. 
+                                  This must be a DNS_LABEL. All ports within a ServiceSpec must have unique names. 
+                                  When considering the endpoints for a Service, this must match the 'name' field in the EndpointPort. 
+                                  Optional if only one ServicePort is defined on this service.
+                                type: string
+                              port:
+                                description: >-
+                                  The port that will be exposed by this service.
+                                type: number
+                              targetPort:
+                                description: >-
+                                  Number or name of the port to access on the pods targeted by the service. 
+                                  Number must be in the range 1 to 65535. Name must be an IANA_SVC_NAME. 
+                                  If this is a string, it will be looked up as a named port in the target Pod's container ports.
+                                type: string
+                              protocol:
+                                description: >-
+                                  The IP protocol for this port. Supports TCP, UDP, and SCTP. Default is TCP. 
+                                  Possible enum values:
+                                    TCP is the TCP protocol.
+                                    UDP is the UDP protocol.
+                                type: string
+                                enum:
+                                  - TCP
+                                  - UDP
+                                default: TCP
+                            required:
+                              - port
+                              - targetPort
+                              - protocol
+                      required:
+                        - name
+                        - type
+                        - ports
+                    ingress:
+                      description: >-
+                        Configuration of the API object that manages external 
+                        access to the services in a cluster.
+                      type: object
+                      properties:
+                        annotations:
+                          description: >-
+                            Ingress frequently uses annotations to configure some 
+                            options depending on the Ingress controller
+                          type: object
+                          additionalProperties:
+                            type: string
+                        ingressClassName:
+                          description: >-
+                            It is the name of an IngressClass cluster resource.
+                            Ingress controller implementations use this field to know whether they 
+                            should be serving this Ingress resource, by a transitive connection.
+                          type: string
+                          enum:
+                            - alb
+                        rules:
+                          description: >-
+                            The list of rules matched against all incoming requests.
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              host:
+                                description: >-
+                                  The hostname which the rules apply to.
+                                  Name-based virtual hosts support routing HTTP traffic to 
+                                  multiple host names at the same IP address.
+                                type: string
+                              http:
+                                description: >-
+                                  Configuration the traffic is HTTP .
+                                type: object
+                                properties:
+                                  paths:
+                                    description: >-
+                                      The list of rules matched against all incoming requests.
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        path:
+                                          description: >-
+                                            Eeach path has an associated backend defined with a
+                                            service.name and a service.port.name or service.port.number.
+                                          type: string
+                                        pathType:
+                                          description: >-
+                                            Each path in an Ingress is required to have a corresponding path type.
+                                          type: string
+                                          enum:
+                                            - Exact
+                                            - Prefix
+                                        backend:
+                                          type: object
+                                          description: >-
+                                            A backend is a combination of Service and port names.
+                                          properties:
+                                            service:
+                                              description: >-
+                                                It is a method for exposing a network application that is running as 
+                                                one or more Pods in your cluster.
+                                              type: object
+                                              properties:
+                                                name:
+                                                  description: >-
+                                                    The name of a Service object must be a valid RFC 1035 label name.
+                                                  type: string
+                                                port:
+                                                  description: >-
+                                                    Port definitions in Pods have names, and you can reference these 
+                                                    names in the targetPort attribute of a Service.
+                                                  type: object
+                                                  properties:
+                                                    number:
+                                                      description: >-
+                                                        Port number that will be exposed
+                                                      type: number
+                                                  required:
+                                                    - number
+                                              required:
+                                                - port
+                                          required:
+                                            - service
+                                      required:
+                                        - path
+                                        - pathType
+                                        - backend
+                                required:
+                                  - paths
+                            required:
+                              - http
+                      required:
+                        - annotations
+                        - rules
+                  required:
+                    - namespace
+                    - name
+                    - deployment
+                    - service
+                    - ingress
+              required:
+                - parameters
+          required:
+            - spec

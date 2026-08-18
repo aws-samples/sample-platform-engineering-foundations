@@ -1,0 +1,8 @@
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: fullstack
+  description: Fullstack App
+spec:
+  targets:
+    - template.yaml

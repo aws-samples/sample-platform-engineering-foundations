@@ -1,0 +1,129 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xlbcontrollers.addon.cluster.platform.cloud
+spec:
+  group: addon.cluster.platform.cloud
+  names:
+    kind: XLBController
+    plural: xlbcontrollers
+  claimNames:
+    kind: LBController
+    plural: lbcontrollers
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the compute container.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                    helmTargetProviderConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                    kubernetesTargetProviderConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external when this 
+                        managed resource is deleted - either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    region:
+                      type: string
+                      description: "AWS region where the EKS cluster is created."
+                      default: "us-east-1"
+                    acronym:
+                      type: string
+                      description: >-
+                        Acronym of the cluster owner
+                    accountId:
+                      type: string
+                      description: >-
+                        Account ID to deploy the cluster
+                    vpcId:
+                      type: string
+                      description: "ID of the VPC where the EKS cluster is created."
+                    loadbalancerController:
+                      type: object
+                      description: "Load Balancer Controller configuration"
+                      properties:
+                        image:
+                          type: string
+                          description: "Image to use for the load balancer controller"
+                        tag:
+                          type: string
+                          description: "Tag to use for the load balancer controller"
+                      required:
+                        - image
+                        - tag
+                    cluster:
+                      type: object
+                      description: "Cluster configuration"
+                      properties:
+                        name:
+                          type: string
+                          description: "Name of the cluster"
+                        oidcUri:
+                          type: string
+                          description: "OIDC URI of the cluster"
+                      required:
+                        - name
+                        - oidcUri
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - providerConfigRef
+                    - region
+                    - acronym
+                    - accountId
+                    - vpcId
+                    - loadbalancerController
+                    - cluster
+                    - tags
+              required:
+                - parameters
+            status:
+              type: object
+              description: >-
+                A Status represents the observed state
+              properties:
+                cluster:
+                  type: object
+                  description: >-
+                    Bucket to store the logs.
+                  properties:
+                    loadBalancerControllerAddonRoleArn:
+                      description: >-
+                        ARN of the lb controller addon role
+                      type: string
+                    loadBalancerControllerReleaseStatus:
+                      description: >-
+                        Release status of the lb controller addon
+                      type: string

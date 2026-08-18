@@ -1,0 +1,167 @@
+# Application API: serverless multi-tier app
+# NESTED resource graph — its resources are instances of OTHER
+# ResourceGraphDefinitions (DynamoDBTable, LambdaFunction, WebAPI,
+# StaticSite), plus one direct ACK IAM Role for the glue.
+#
+# Mirrors the Crossplane XServerlessMultiTier composition from module 3.
+# Owned by the app platform team.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: serverless-multi-tier
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: ServerlessMultiTier
+    spec:
+      name: string
+      # S3 location of the Lambda deployment package
+      s3Bucket: string
+      s3Key: string | default="function-python-users-posts.zip"
+      # small | medium | large | xlarge
+      size: string | default="medium"
+      environment: string | default="dev"
+      # Globally-unique suffix for the frontend bucket (e.g. account ID)
+      bucketSuffix: string
+    status:
+      apiEndpoint: ${api.status.apiEndpoint}
+      usersTableArn: ${usersTable.status.tableArn}
+      postsTableArn: ${postsTable.status.tableArn}
+      functionArn: ${backend.status.functionArn}
+      frontendBucket: ${frontend.status.bucketName}
+
+  resources:
+    # ==========================================================
+    # Data tier: two DynamoDB tables (nested DynamoDBTable graphs)
+    # ==========================================================
+    - id: usersTable
+      template:
+        apiVersion: kro.run/v1alpha1
+        kind: DynamoDBTable
+        metadata:
+          name: ${schema.spec.name}-users-table
+        spec:
+          name: ${schema.spec.name}-users-table
+          hashKeyName: id
+          hashKeyType: "N"
+          environment: ${schema.spec.environment}
+
+    - id: postsTable
+      template:
+        apiVersion: kro.run/v1alpha1
+        kind: DynamoDBTable
+        metadata:
+          name: ${schema.spec.name}-posts-table
+        spec:
+          name: ${schema.spec.name}-posts-table
+          hashKeyName: id
+          hashKeyType: "N"
+          environment: ${schema.spec.environment}
+
+    # ==========================================================
+    # IAM glue: execution role with a least-privilege inline
+    # policy scoped to the two table ARNs (direct ACK resource)
+    # ==========================================================
+    - id: lambdaRole
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.name}-lambda-role
+        spec:
+          name: ${schema.spec.name}-lambda-role
+          assumeRolePolicyDocument: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "lambda.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            }
+          policies:
+            - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          inlinePolicies:
+            dynamodb-access: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": [
+                      "dynamodb:GetItem",
+                      "dynamodb:BatchGetItem",
+                      "dynamodb:Scan",
+                      "dynamodb:Query",
+                      "dynamodb:PutItem",
+                      "dynamodb:UpdateItem",
+                      "dynamodb:DeleteItem",
+                      "dynamodb:BatchWriteItem"
+                    ],
+                    "Resource": [
+                      "${usersTable.status.tableArn}",
+                      "${usersTable.status.tableArn}/index/*",
+                      "${postsTable.status.tableArn}",
+                      "${postsTable.status.tableArn}/index/*"
+                    ]
+                  }
+                ]
+              }
+          tags:
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+
+    # ==========================================================
+    # Logic tier: backend function (nested LambdaFunction graph)
+    # Waits automatically: references role ARN + table names
+    # ==========================================================
+    - id: backend
+      template:
+        apiVersion: kro.run/v1alpha1
+        kind: LambdaFunction
+        metadata:
+          name: ${schema.spec.name}-backend
+        spec:
+          name: ${schema.spec.name}-backend
+          s3Bucket: ${schema.spec.s3Bucket}
+          s3Key: ${schema.spec.s3Key}
+          size: ${schema.spec.size}
+          roleArn: ${lambdaRole.status.ackResourceMetadata.arn}
+          environment: ${schema.spec.environment}
+          environmentVariables:
+            DYNAMO_DB_USERS_TABLE_NAME: ${usersTable.status.tableName}
+            DYNAMO_DB_POSTS_TABLE_NAME: ${postsTable.status.tableName}
+
+    # ==========================================================
+    # Entrypoint tier: HTTP API (nested WebAPI graph)
+    # Waits automatically: references the backend function ARN
+    # ==========================================================
+    - id: api
+      template:
+        apiVersion: kro.run/v1alpha1
+        kind: WebAPI
+        metadata:
+          name: ${schema.spec.name}-api
+        spec:
+          name: ${schema.spec.name}-api
+          targetFunctionArn: ${backend.status.functionArn}
+          environment: ${schema.spec.environment}
+
+    # ==========================================================
+    # Presentation tier: frontend bucket (nested StaticSite graph)
+    # ==========================================================
+    - id: frontend
+      template:
+        apiVersion: kro.run/v1alpha1
+        kind: StaticSite
+        metadata:
+          name: ${schema.spec.name}-frontend
+        spec:
+          name: ${schema.spec.name}-frontend-${schema.spec.bucketSuffix}
+          environment: ${schema.spec.environment}

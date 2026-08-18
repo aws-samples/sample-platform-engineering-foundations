@@ -1,0 +1,21 @@
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: serverless-app-rds-sg
+  namespace: default
+spec:
+  description: "Allow PostgreSQL access from Lambda"
+  name: serverless-app-rds-sg
+  vpcID: VPC_ID    # Replace with your VPC ID
+  ingressRules:
+    - ipProtocol: tcp
+      fromPort: 5432
+      toPort: 5432
+      ipRanges:
+        - cidrIP: "10.0.0.0/8"
+          description: "PostgreSQL from private subnets"
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

@@ -1,0 +1,29 @@
+apiVersion: network.platform.cloud/v1alpha1
+kind: NetworkBasic
+metadata:
+  name: net-basic-001
+  namespace: dev
+spec:
+  compositionSelector:
+    matchLabels:
+      network.platform.cloud/type: networkbasic
+  parameters:
+    providerConfigRef:
+      name: aws-psp-us-east-1-123456789012
+    deletionPolicy: Delete
+    region: "us-east-1"
+    vpcCidr: "10.0.0.0/16"
+    publicSubnetA:
+      cidrBlock: "10.0.0.0/19"
+      availabilityZone: "us-east-1a"
+    publicSubnetB:
+      cidrBlock: "10.0.32.0/19"
+      availabilityZone: "us-east-1b"
+    privateSubnetA:
+      cidrBlock: "10.0.64.0/19"
+      availabilityZone: "us-east-1a"
+    privateSubnetB:
+      cidrBlock: "10.0.96.0/19"
+      availabilityZone: "us-east-1b"
+    tags:
+      app: "psp"

@@ -1,0 +1,97 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xlambdafunction.compute.platform.cloud
+  labels:
+    compute.platform.cloud/type: lambdafunction
+    lambdafunction.compute.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: compute.platform.cloud/v1alpha1
+    kind: XLambdaFunction
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+
+        resources:
+          - name: lambda-function
+            base:
+              apiVersion: lambda.aws.upbound.io/v1beta2
+              kind: Function
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.handler
+                toFieldPath: spec.forProvider.handler
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.packageType
+                toFieldPath: spec.forProvider.packageType
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.runtime
+                toFieldPath: spec.forProvider.runtime
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.s3Bucket
+                toFieldPath: spec.forProvider.s3Bucket
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.s3Key
+                toFieldPath: spec.forProvider.s3Key
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.timeout
+                toFieldPath: spec.forProvider.timeout
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.roleArn
+                toFieldPath: spec.forProvider.role
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.memorySize
+                toFieldPath: spec.forProvider.memorySize
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.vpcConfig
+                toFieldPath: spec.forProvider.vpcConfig
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.variables
+                toFieldPath: spec.forProvider.environment.variables
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.lambdaName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.lambdaArn
+
+    - step: automatically-detect-readiness
+      functionRef:
+        name: function-auto-ready

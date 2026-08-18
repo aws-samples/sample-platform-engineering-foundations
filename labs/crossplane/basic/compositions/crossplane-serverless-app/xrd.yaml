@@ -1,0 +1,129 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xserverlessapps.awsblueprints.io
+spec:
+  group: awsblueprints.io
+  names:
+    kind: XServerlessApp
+    plural: xserverlessapps
+  claimNames:
+    kind: ServerlessApp
+    plural: serverlessapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          properties:
+            spec:
+              type: object
+              required:
+                - region
+                - vpcId
+                - subnetIds
+              properties:
+                # --- Application settings ---
+                appName:
+                  type: string
+                  description: "Name prefix for all resources"
+                region:
+                  type: string
+                  description: "AWS region to deploy into"
+                environment:
+                  type: string
+                  default: dev
+                  enum: [dev, staging, prod]
+
+                # --- Network ---
+                vpcId:
+                  type: string
+                  description: "VPC ID for security groups and RDS"
+                subnetIds:
+                  type: array
+                  items:
+                    type: string
+                  description: "Private subnet IDs for RDS and Lambda"
+
+                # --- RDS settings ---
+                databaseName:
+                  type: string
+                  default: appdb
+                dbInstanceClass:
+                  type: string
+                  default: db.t3.medium
+                dbEngine:
+                  type: string
+                  default: postgres
+                dbEngineVersion:
+                  type: string
+                  default: "17.4"
+                storageGB:
+                  type: integer
+                  default: 20
+
+                # --- Lambda settings ---
+                lambdaRuntime:
+                  type: string
+                  default: python3.12
+                lambdaHandler:
+                  type: string
+                  default: index.handler
+                lambdaS3Bucket:
+                  type: string
+                  description: "S3 bucket containing the Lambda deployment package"
+                lambdaS3Key:
+                  type: string
+                  description: "S3 key for the Lambda deployment package (.zip)"
+                lambdaMemoryMB:
+                  type: integer
+                  default: 256
+                lambdaTimeoutSeconds:
+                  type: integer
+                  default: 30
+
+                # --- Frontend settings ---
+                frontendEnabled:
+                  type: boolean
+                  default: true
+                  description: "Enable S3 + CloudFront frontend hosting"
+                frontendDefaultRootObject:
+                  type: string
+                  default: index.html
+                  description: "Default root object for CloudFront"
+                frontendPriceClass:
+                  type: string
+                  default: PriceClass_100
+                  enum: [PriceClass_100, PriceClass_200, PriceClass_All]
+                  description: "CloudFront price class"
+
+                # --- App Deployment settings (cluster-3) ---
+                appDeploymentEnabled:
+                  type: boolean
+                  default: true
+                  description: "Deploy a sample app container to cluster-3"
+                appImage:
+                  type: string
+                  default: "public.ecr.aws/nginx/nginx:1.27"
+                  description: "Container image for the app deployment on cluster-3"
+                appReplicas:
+                  type: integer
+                  default: 2
+                  description: "Number of replicas for the app deployment"
+                appPort:
+                  type: integer
+                  default: 80
+                  description: "Container port for the app deployment"
+            status:
+              type: object
+              properties:
+                frontendBucketDomainName:
+                  type: string
+                  description: "Regional domain name of the frontend S3 bucket"
+                frontendBucketArn:
+                  type: string
+                  description: "ARN of the frontend S3 bucket"
+                cloudfrontOaiIamArn:
+                  type: string
+                  description: "IAM ARN of the CloudFront Origin Access Identity"

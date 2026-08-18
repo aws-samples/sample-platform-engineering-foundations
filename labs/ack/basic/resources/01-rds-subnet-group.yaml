@@ -1,0 +1,16 @@
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBSubnetGroup
+metadata:
+  name: serverless-app-rds-subnet-group
+  namespace: default
+spec:
+  name: serverless-app-rds-subnet-group
+  description: "Subnet group for serverless app RDS"
+  subnetIDs:
+    - SUBNET_ID_1    # Replace with your private subnet ID
+    - SUBNET_ID_2    # Replace with your private subnet ID
+  tags:
+    - key: Environment
+      value: workshop
+    - key: ManagedBy
+      value: ACK

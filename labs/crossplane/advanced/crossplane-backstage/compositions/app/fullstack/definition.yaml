@@ -1,0 +1,116 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xfullstacks.app.platform.cloud
+spec:
+  group: app.platform.cloud
+  names:
+    kind: XFullStack
+    plural: xfullstacks
+  claimNames:
+    kind: FullStack
+    plural: fullstacks
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                parameters:
+                  type: object
+                  description: >-
+                    Object of parameters to configure the bucket.
+                  properties:
+                    providerConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    k8sProviderConfigRef:
+                      type: object
+                      description: "It tells the Provider which ProviderConfig to use when creating the managed resource"
+                      properties:
+                        name:
+                          description: "Name of the ProviderConfig to use"
+                          type: string
+                          default: "default"
+                    region:
+                      type: string
+                      description: >-
+                        Region is the resources is located.
+                    deletionPolicy:
+                      type: string
+                      description: >-
+                        DeletionPolicy specifies what will happen to the underlying external 
+                        when this managed resource is deleted
+                        either "Delete" or "Orphan" the external resource.
+                      default: Delete
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace to deploy the compute container.
+                    name:
+                      description: >-
+                        The name of the app.
+                      type: string
+                    subnetIds:
+                      type: array
+                      description: >-
+                        A list of VPC subnet IDs.
+                      items:
+                        type: string
+                    securityGroupIds:
+                      type: array
+                      description: >-
+                        VPC security groups associated
+                        with the app.
+                      items:
+                        type: string
+                    backend:
+                      type: object
+                      description: >-
+                        Settings for the backend app.
+                      properties:
+                        image:
+                          type: string
+                          description: >-
+                            The image to use for the backend app.
+                        port:
+                          type: string
+                          description: >-
+                            Port that the backend app listens on.
+                        path:
+                          type: string
+                          description: >-
+                            Path that the backend app listens on.
+                    tags:
+                      description: Key-value map of tags. This object accepts the maximum number of 40 tags.
+                      type: object
+                      maxProperties: 40
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - region
+                    - name
+                    - tags
+              required:
+                - parameters
+            status:
+              properties:
+                database:
+                  type: object
+                  description: >-
+                    Object with relevant information resulting from 
+                    the cahce to be used by other compositions.
+                  properties:
+                    address:
+                      description: >-
+                        Address to access the database.
+                      type: string
+              type: object

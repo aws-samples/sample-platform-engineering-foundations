@@ -1,0 +1,602 @@
+openapi: 3.0.1
+info:
+  title: Users and Posts API
+  description: RESTful API for managing users and their posts
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+servers:
+  - url: https://api.example.com/v1
+    description: Production server
+  - url: http://localhost:8080
+    description: Local development server
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the API
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "UP"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+  /api/v1/users:
+    get:
+      summary: List all users
+      description: Returns a paginated list of users
+      operationId: getUsers
+      tags:
+        - Users
+      parameters:
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        "200":
+          description: A list of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    post:
+      summary: Create a new user
+      description: Creates a new user in the system
+      operationId: createUser
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreate"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+  /api/v1/users/{id}:
+    get:
+      summary: Get user by ID
+      description: Returns a single user by ID
+      operationId: getUser
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          description: User ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    put:
+      summary: Update user
+      description: Updates an existing user
+      operationId: updateUser
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          description: User ID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    delete:
+      summary: Delete user
+      description: Deletes an existing user
+      operationId: deleteUser
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          description: User ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "user deleted successfully"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+  /api/v1/posts:
+    get:
+      summary: List all posts
+      description: Returns a paginated list of posts
+      operationId: getPosts
+      tags:
+        - Posts
+      parameters:
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        "200":
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Post"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    post:
+      summary: Create a new post
+      description: Creates a new post in the system
+      operationId: createPost
+      tags:
+        - Posts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostCreate"
+      responses:
+        "201":
+          description: Post created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+  /api/v1/posts/{id}:
+    get:
+      summary: Get post by ID
+      description: Returns a single post by ID
+      operationId: getPost
+      tags:
+        - Posts
+      parameters:
+        - name: id
+          in: path
+          description: Post ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Post found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "404":
+          description: Post not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    put:
+      summary: Update post
+      description: Updates an existing post
+      operationId: updatePost
+      tags:
+        - Posts
+      parameters:
+        - name: id
+          in: path
+          description: Post ID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostUpdate"
+      responses:
+        "200":
+          description: Post updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Post not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+    delete:
+      summary: Delete post
+      description: Deletes an existing post
+      operationId: deletePost
+      tags:
+        - Posts
+      parameters:
+        - name: id
+          in: path
+          description: Post ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Post deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "post deleted successfully"
+        "404":
+          description: Post not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      x-amazon-apigateway-integration:
+        uri: arn:aws:apigateway:##region##:lambda:path/2015-03-31/functions/##lambda_arn##/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: when_no_match
+
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: "John Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+        created_at:
+          type: string
+          format: date-time
+          example: "2023-09-15T14:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2023-09-15T14:30:00Z"
+
+    UserCreate:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          example: "John Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+
+    UserUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "John Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+
+    Post:
+      type: object
+      required:
+        - id
+        - title
+        - content
+        - user_id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        title:
+          type: string
+          example: "My First Post"
+        content:
+          type: string
+          example: "This is the content of my first post"
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+        user:
+          $ref: "#/components/schemas/User"
+        created_at:
+          type: string
+          format: date-time
+          example: "2023-09-15T14:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2023-09-15T14:30:00Z"
+
+    PostCreate:
+      type: object
+      required:
+        - title
+        - content
+        - user_id
+      properties:
+        title:
+          type: string
+          example: "My First Post"
+        content:
+          type: string
+          example: "This is the content of my first post"
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+
+    PostUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          example: "Updated Post Title"
+        content:
+          type: string
+          example: "Updated post content"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Error message"
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Users
+    description: User management endpoints
+  - name: Posts
+    description: Post management endpoints
+
+x-amazon-apigateway-binary-media-types:
+  - "application/json"
+x-amazon-apigateway-request-validators:
+  basic:
+    validateRequestBody: true
+    validateRequestParameters: true

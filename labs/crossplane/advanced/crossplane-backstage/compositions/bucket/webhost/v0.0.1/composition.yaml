@@ -1,0 +1,324 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xwebhost.bucket.platform.cloud
+  labels:
+    bucket.platform.cloud/type: webhost
+    webhost.bucket.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: bucket.platform.cloud/v1alpha1
+    kind: XBucketWebHost
+  mode: Pipeline
+  pipeline:
+    - step: create-webhost-bucket
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+        resources:
+          - name: webhost-bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              metadata:
+                labels:
+                  resource: webhost-bucket
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-webhost"
+              - fromFieldPath: spec.parameters.bucket.forceDestroy
+                toFieldPath: spec.forProvider.forceDestroy
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.bucketDomainName
+                toFieldPath: status.bucket.webhost.domainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.bucketRegionalDomainName
+                toFieldPath: status.bucket.webhost.regionalDomainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.bucket.webhost.name
+
+          - name: s3-cors-configuration
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketCorsConfiguration
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.corsRule
+                toFieldPath: spec.forProvider.corsRule
+
+          - name: s3-block-public-access
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                forProvider:
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+
+          - name: s3-server-side-encryption
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        - sseAlgorithm: AES256
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+
+          - name: s3-bucket-versioning
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.versioningStatus
+                toFieldPath: spec.forProvider.versioningConfiguration[0].status
+
+          - name: s3-bucket-policy-cloudfront
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketPolicy
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - combine:
+                  strategy: string
+                  string:
+                    fmt: |-
+                      {
+                        "Version": "2012-10-17",
+                        "Statement": {
+                            "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "cloudfront.amazonaws.com"
+                            },
+                            "Action": "s3:GetObject",
+                            "Resource": [
+                              "arn:aws:s3:::%[1]s",
+                              "arn:aws:s3:::%[1]s/*"
+                            ],
+                            "Condition": {
+                                "StringEquals": {
+                                    "AWS:SourceArn": "arn:aws:cloudfront::*:distribution/*"
+                                }
+                            }
+                        }
+                      }
+                  variables:
+                    - fromFieldPath: status.bucket.webhost.name
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.policy
+                type: CombineFromComposite
+
+          - name: s3-bucket-logging
+            base:
+              apiVersion: bucket.platform.cloud/v1alpha1
+              kind: XBucketLogging
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    bucket.platform.cloud/type: bucketlogging
+                compositionRevisionSelector:
+                  matchLabels:
+                    bucketlogging.bucket.platform.cloud/version: v0.0.1
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.parameters.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.parameters.deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.parameters.tags
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-webhost"
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.bucket.logging.bucketName
+                toFieldPath: status.bucket.webhost.loggingBucketName
+
+          - name: s3-link-bucket-logging
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketLogging
+              spec:
+                forProvider:
+                  targetPrefix: "/"
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: status.bucket.webhost.loggingBucketName
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.forProvider.targetBucket
+
+          - name: s3-lifecycle-configuration
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: BucketLifecycleConfiguration
+              spec:
+                forProvider:
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      resource: webhost-bucket
+                  rule:
+                    - noncurrentVersionTransition:
+                        - storageClass: "GLACIER"
+                      transition:
+                        - storageClass: STANDARD_IA
+                        - storageClass: GLACIER
+            patches:
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.rule[0].id
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-webhost-bucket-transition-rule"
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.transitionStatus
+                toFieldPath: spec.forProvider.rule[0].status
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.transitionPrefix
+                toFieldPath: spec.forProvider.rule[0].filter[0].prefix
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.nonCurrentVersionTransitionDays
+                toFieldPath: spec.forProvider.rule[0].noncurrentVersionTransition[0].noncurrentDays
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.standardTransitionDays
+                toFieldPath: spec.forProvider.rule[0].transition[0].days
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.glacierTransitionDays
+                toFieldPath: spec.forProvider.rule[0].transition[1].days
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.forProvider.rule[1].id
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-webhost-expiration-rule"
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.expirationStatus
+                toFieldPath: spec.forProvider.rule[1].status
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.expirationPrefix
+                toFieldPath: spec.forProvider.rule[1].filter[0].prefix
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.nonCurrentVersionExpirationDays
+                toFieldPath: spec.forProvider.rule[1].noncurrentVersionExpiration[0].noncurrentDays
+              - fromFieldPath: spec.parameters.lifecycleConfiguration.expirationDays
+                toFieldPath: spec.forProvider.rule[1].expiration[0].days
+
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready

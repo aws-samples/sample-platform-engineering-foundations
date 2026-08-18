@@ -1,0 +1,41 @@
+# Building block: static site bucket
+# Wraps the ACK S3 Bucket resource with public access blocked by default.
+# Owned by the frontend platform team.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: static-site
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: StaticSite
+    spec:
+      # Bucket names are global — include a unique suffix (e.g. account ID)
+      name: string
+      environment: string | default="dev"
+    status:
+      bucketName: ${bucket.spec.name}
+      bucketArn: ${bucket.status.ackResourceMetadata.arn}
+
+  resources:
+    - id: bucket
+      readyWhen:
+        - ${bucket.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: s3.services.k8s.aws/v1alpha1
+        kind: Bucket
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          publicAccessBlock:
+            blockPublicAcls: true
+            blockPublicPolicy: true
+            ignorePublicAcls: true
+            restrictPublicBuckets: true
+          tagging:
+            tagSet:
+              - key: Environment
+                value: ${schema.spec.environment}
+              - key: ManagedBy
+                value: KRO-ACK

@@ -1,0 +1,264 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xfullstack.app.platform.cloud
+  labels:
+    app.platform.cloud/type: fullstack
+    fullstack.app.platform.cloud/version: v0.0.1
+spec:
+  compositeTypeRef:
+    apiVersion: app.platform.cloud/v1alpha1
+    kind: XFullStack
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.parameters.region
+          - name: deletionPolicy
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.parameters.deletionPolicy
+          - name: providerConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.providerConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+          - name: k8sProviderConfigRef
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.k8sProviderConfigRef
+                toFieldPath: spec.parameters.providerConfigRef
+          - name: tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.parameters.tags
+        resources:
+          - name: database
+            base:
+              apiVersion: database.platform.cloud/v1alpha1
+              kind: XPostgresql
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    database.platform.cloud/type: postgresql
+                parameters:
+                  instanceClass: db.t4g.medium
+                  storage: 20
+                  backupRetentionPeriod: 14
+                  username: adminuser
+                  port: 5432
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.dbName
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%sdb"
+              - fromFieldPath: spec.parameters.securityGroupIds
+                toFieldPath: spec.parameters.securityGroupIds
+              - fromFieldPath: spec.parameters.subnetIds
+                toFieldPath: spec.parameters.subnetIds
+              - fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.parameters.secretNamespace
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.database.address
+                toFieldPath: status.database.address
+          - name: compute
+            base:
+              apiVersion: compute.platform.cloud/v1alpha1
+              kind: XContainer
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    compute.platform.cloud/type: container
+                parameters:
+                  deployment:
+                    replicas: 1
+                    revisionHistoryLimit: 1
+                    containers:
+                      - ports:
+                          - protocol: TCP
+                        resources:
+                          limits:
+                            memory: "256Mi"
+                            cpu: "200m"
+                          requests:
+                            memory: "128Mi"
+                            cpu: "100m"
+                        env:
+                          - name: DB_PASSWORD
+                            valueFrom:
+                              secretKeyRef:
+                                key: password
+                          - name: DB_HOST
+                          - name: SERVER_PORT
+                          - name: API_PREFIX
+                          - name: ENVIRONMENT
+                            value: "development"
+                          - name: LOG_LEVEL
+                            value: "debug"
+                          - name: DB_SSLMODE
+                            value: "require"
+                          - name: DB_PORT
+                            value: "5432"
+                          - name: DB_USER
+                            value: "adminuser"
+                          - name: DB_NAME
+                            value: "postgres"
+                  service:
+                    type: NodePort
+                    ports:
+                      - name: http
+                        protocol: TCP
+                  ingress:
+                    annotations:
+                      alb.ingress.kubernetes.io/scheme: internet-facing
+                      alb.ingress.kubernetes.io/target-type: ip
+                      alb.ingress.kubernetes.io/group.name: default
+                      alb.ingress.kubernetes.io/healthcheck-path: "/health"
+                      alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+                      alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+                      alb.ingress.kubernetes.io/success-codes: "200"
+                    ingressClassName: alb
+                    rules:
+                      - http:
+                          paths:
+                            - pathType: Prefix
+            patches:
+              - patchSetName: k8sProviderConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - fromFieldPath: spec.parameters.namespace
+                toFieldPath: spec.parameters.namespace
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-backend"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.deployment.containers[0].name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-container"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.deployment.containers[0].ports[0].name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-svc"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.service.ports[0].targetPort
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-svc"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.service.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-service"
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.ingress.rules[0].http.paths[0].backend.service.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-service"
+              - fromFieldPath: spec.parameters.backend.image
+                toFieldPath: spec.parameters.deployment.containers[0].image
+              - fromFieldPath: spec.parameters.backend.port
+                toFieldPath: spec.parameters.deployment.containers[0].ports[0].containerPort
+                transforms:
+                  - type: convert
+                    convert:
+                      toType: int
+              - fromFieldPath: spec.parameters.backend.port
+                toFieldPath: spec.parameters.service.ports[0].port
+                transforms:
+                  - type: convert
+                    convert:
+                      toType: int
+              - fromFieldPath: spec.parameters.backend.port
+                toFieldPath: spec.parameters.ingress.rules[0].http.paths[0].backend.service.port.number
+                transforms:
+                  - type: convert
+                    convert:
+                      toType: int
+              - fromFieldPath: spec.parameters.backend.path
+                toFieldPath: spec.parameters.ingress.rules[0].http.paths[0].path
+              - fromFieldPath: spec.parameters.backend.path
+                toFieldPath: spec.parameters.deployment.containers[0].env[3].value
+              - fromFieldPath: spec.parameters.backend.port
+                toFieldPath: spec.parameters.deployment.containers[0].env[2].value
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.deployment.containers[0].env[0].valueFrom.secretKeyRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%sdb-password-data"
+              - fromFieldPath: status.database.address
+                policy:
+                  fromFieldPath: Required
+                toFieldPath: spec.parameters.deployment.containers[0].env[1].value
+          - name: frontend
+            base:
+              apiVersion: frontend.platform.cloud/v1alpha1
+              kind: XSpa
+              spec:
+                compositionSelector:
+                  matchLabels:
+                    frontend.platform.cloud/type: spa
+                parameters:
+                  viewerCertificate:
+                    - cloudfrontDefaultCertificate: true
+                  aliases: []
+            patches:
+              - patchSetName: region
+                type: PatchSet
+              - patchSetName: providerConfigRef
+                type: PatchSet
+              - patchSetName: deletionPolicy
+                type: PatchSet
+              - patchSetName: tags
+                type: PatchSet
+              - fromFieldPath: spec.parameters.name
+                toFieldPath: spec.parameters.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-frontend"
+
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready
