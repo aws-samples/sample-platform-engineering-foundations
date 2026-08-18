@@ -145,6 +145,8 @@ See [docs/architecture.md](docs/architecture.md) for the reasoning behind the to
 > `lambda/`, along with the Backstage build files under `backstage-genai/`. Source lives in
 > [`assets/backstage-genai/`](assets/backstage-genai). Two Lambdas are published and both are
 > deployed in every environment: `prewarm` and `supported-list-validator`.
+> It also syncs [`labs/`](labs) to `ack/`, `kro/` and `crossplane/` in the same bucket, because two
+> of the labs have you download their manifests from there rather than from this repository.
 > A hosted workshop performs this step for you.
 
 ### 1. Clusters, networking, and supporting resources
@@ -161,7 +163,7 @@ aws cloudformation deploy \
   --region us-east-1
 ```
 
-Roughly 20 minutes, 98 resources.
+Roughly 20 minutes, 100 resources.
 
 > **`--s3-bucket` is required, not optional.** This template is 77 KB and CloudFormation only
 > accepts templates up to 51,200 bytes inline, so the CLI has to stage it in S3 first. Reuse the
@@ -205,6 +207,22 @@ aws eks list-clusters --region us-east-1
 aws eks update-kubeconfig --name psp-cluster-1-platform --region us-east-1
 kubectl get nodepools    # general-purpose, system
 ```
+
+### 3. Lab manifests in the IDE
+
+Two of the labs read their manifests from `~/environment/{ack,kro,crossplane}` in the IDE. Copy them
+in once, from a terminal **inside** the IDE:
+
+```bash
+BUCKET=<your-assets-bucket>
+for d in ack kro crossplane; do
+  aws s3 cp "s3://${BUCKET}/${d}/" "$HOME/environment/${d}/" --recursive --quiet
+done
+```
+
+The other directories the labs use - `custom-templates`, `legacy-iac`, `catalog`, `cnoe` - are
+created as you go. `cnoe` in particular must not exist beforehand: you clone it from the in-cluster
+Gitea, and a pre-existing directory makes that `git clone` fail.
 
 ## Labs
 
