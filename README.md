@@ -304,17 +304,23 @@ same way: the EKS cluster itself becomes a resource with an API, a management cl
 and bootstraps workload clusters, Argo CD registers them automatically, and Kargo promotes an
 application across the fleet.
 
-That material is a separate AWS sample, and it is not duplicated here:
+That material is a separate AWS sample, and it is not duplicated here. Clone it on its own:
 
-**[aws-samples/fleet-management-on-amazon-eks-workshop](https://github.com/aws-samples/fleet-management-on-amazon-eks-workshop)**
-— see `patterns/kro-eks-cluster-mgmt/`
+```bash
+git clone https://github.com/aws-samples/fleet-management-on-amazon-eks-workshop.git
+cd fleet-management-on-amazon-eks-workshop/patterns/kro-eks-cluster-mgmt
+cat README.md
+```
 
 It is a **separate environment**, with its own IDE stack, Terraform, and GitLab, and it costs
 materially more than this workshop: hub plus four spokes across two regions means five EKS control
-planes and five VPCs. Read its README before deploying, and budget accordingly.
+planes and five VPCs. Deploy it in a fresh account, not on top of the three clusters from these
+labs, and read its README first: the prerequisites and the deploy order are its own.
 
 > The upstream copy carries account identifiers, generated credentials and hostnames from its
 > authors' development environment. Replace them with your own values before you deploy anything.
+> Its `patterns/kro-eks-cluster-mgmt/` directory is the entry point; the rest of the repository
+> covers other patterns you do not need for this.
 
 ## Cost
 
