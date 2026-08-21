@@ -19,7 +19,7 @@ spec:
       ]
     }
   policies:
-    - arn: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+    - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
   tags:
     - key: Environment
       value: workshop

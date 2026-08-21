@@ -1,13 +1,11 @@
 ---
-apiVersion: pkg.crossplane.io/v1
-kind: Provider
-metadata:
-  name: provider-family-aws
-spec:
-  package: xpkg.upbound.io/upbound/provider-family-aws:v1.23.1
-  runtimeConfigRef:
-    name: default-drc
----
+# NOTE: do NOT install provider-family-aws explicitly. Each Upbound service
+# provider below depends on the family provider, and Crossplane installs it
+# automatically (as upbound-provider-family-aws). Declaring it here as well
+# creates a duplicate node in the package lock ("node
+# xpkg.upbound.io/upbound/provider-family-aws already exists"), which stalls
+# dependency resolution and leaves the providers stuck HEALTHY=False on
+# Crossplane v2.x core.
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
