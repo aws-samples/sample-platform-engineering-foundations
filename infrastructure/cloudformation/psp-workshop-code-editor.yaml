@@ -69,6 +69,29 @@ Parameters:
     Default: 60
     Description: 'Root volume size in GB'
 
+  # Workshop Studio assets bucket. The IDE consumes two things from it, both
+  # seeded into ~/environment: the module 3 artefacts (the legacy IaC estate and
+  # the ACK adoption transformation definition) and the hands-on lab trees
+  # (ack/, crossplane/, kro/). Publish them with scripts/upload-iac-migration-assets.sh
+  # and scripts/upload-lab-assets.sh before deploying this stack.
+  # NOTE: `assets/` is NOT published by Workshop Studio (it is the "S3 Assets"
+  # folder, uploaded via the CLI); putting a file there does not put it in this
+  # bucket. See the header of scripts/upload-lab-assets.sh.
+  WorkshopAssetsBucket:
+    Type: String
+    Default: ''
+    Description: >-
+      Bucket holding the workshop assets. In Workshop Studio this comes from the
+      {{.AssetsBucketName}} magic variable. Empty disables the module 4 seeding,
+      which is why the seeding step never fails a manual deploy.
+
+  AssetsBucketPrefix:
+    Type: String
+    Default: ''
+    Description: >-
+      Prefix inside the bucket. In Workshop Studio this comes from
+      {{.AssetsBucketPrefix}} and ALREADY ENDS with '/'.
+
   AtxCliVersion:
     Type: String
     Default: '3.9.0'
@@ -265,6 +288,12 @@ Resources:
           GitHubRepoUrl:
             type: String
             default: 'https://github.com/cnoe-io/reference-implementation-aws'
+          WorkshopAssetsBucket:
+            type: String
+            default: ''
+          AssetsBucketPrefix:
+            type: String
+            default: ''
         mainSteps:
           - action: aws:runShellScript
             name: installTools
@@ -331,6 +360,11 @@ Resources:
                 - |
                   set -euxo pipefail
                   install -d -o ec2-user -g ec2-user /home/ec2-user/environment /home/ec2-user/.config/code-server
+                  # Disable the AWS CLI pager for every shell. Without this, long
+                  # command output (aws iam create-role, aws eks describe-capability,
+                  # ...) opens in `less` and traps participants in a pager mid-step.
+                  echo 'export AWS_PAGER=""' > /etc/profile.d/aws-pager.sh
+                  chmod 0644 /etc/profile.d/aws-pager.sh
                   # auth: none - authentication happens at the edge (the CloudFront
                   # Function validates the token and writes a cookie). Port 8080 only
                   # accepts the CloudFront prefix list, so there is no path to the
@@ -365,6 +399,48 @@ Resources:
                   # and code-server only reads it at startup.
                   systemctl enable code-server@ec2-user
                   systemctl restart code-server@ec2-user
+          - action: aws:runShellScript
+            name: seedWorkshopAssets
+            inputs:
+              timeoutSeconds: '300'
+              runCommand:
+                - |
+                  set -euxo pipefail
+                  # Seed the hands-on asset trees the workshop pages consume from
+                  # ~/environment (ack/, kro/, crossplane/).
+                  #
+                  # These live in this repo's assets/ folder, which Workshop Studio
+                  # does NOT publish - assets/ is the "S3 Assets" folder, uploaded
+                  # via the CLI (scripts/upload-lab-assets.sh). Putting a file in the repo does
+                  # not put it in this bucket.
+                  #
+                  # Fail loudly, PER TREE, if a copy comes back empty, so a missing
+                  # upload or permission surfaces during provisioning instead of
+                  # mid-workshop. A combined count is not enough: kro alone was
+                  # already published while ack and crossplane were absent, so a
+                  # total-only check passed and the participant hit the gap at the
+                  # first ACK step.
+                  BUCKET="{{ WorkshopAssetsBucket }}"
+                  PREFIX="{{ AssetsBucketPrefix }}"
+                  if [ -z "$BUCKET" ]; then
+                    echo "WorkshopAssetsBucket empty (manual/dev deploy) - skipping asset seed"
+                    exit 0
+                  fi
+                  install -d -o ec2-user -g ec2-user /home/ec2-user/environment
+                  missing=""
+                  for d in ack kro crossplane; do
+                    aws s3 cp "s3://${BUCKET}/${PREFIX}${d}/" \
+                      "/home/ec2-user/environment/${d}/" --recursive --quiet || true
+                    c=$(find "/home/ec2-user/environment/${d}" -type f 2>/dev/null | wc -l)
+                    echo "seeded ${c} files into ~/environment/${d}"
+                    [ "$c" -gt 0 ] || missing="${missing} ${d}"
+                  done
+                  chown -R ec2-user:ec2-user /home/ec2-user/environment
+                  if [ -n "$missing" ]; then
+                    echo "FATAL: no files seeded for:${missing} (from s3://${BUCKET}/${PREFIX})"
+                    echo "       publish them with scripts/upload-lab-assets.sh before deploying this stack"
+                    exit 1
+                  fi
           - action: aws:runShellScript
             name: configureIdeSettings
             inputs:
@@ -511,12 +587,11 @@ Resources:
 
                   # WARNING: an ACTIVE cluster answers update-kubeconfig, but that
                   # does NOT mean this IDE can talk to it. Access depends on an EKS
-                  # Access Entry for the VSCodeInstanceRole, and the three
-                  # AccessEntry resources in this template reference the cluster by
-                  # NAME, not by !Ref - CloudFormation does not know they depend on
-                  # the clusters and guarantees no ordering. It works today because
-                  # the clusters reach ACTIVE before CloudFormation gets to them,
-                  # which is ordering by luck, not a declared dependency.
+                  # Access Entry for the VSCodeInstanceRole. The AccessEntry
+                  # resources in the EKS template declare their dependency properly
+                  # (!Ref + DependsOn - audited 16/08), but the two STACKS are
+                  # independent: this IDE stack cannot order itself against the
+                  # cluster stack, so the access check below stays load-bearing.
                   #
                   # That is why the check here is for ACCESS, not configuration: a
                   # real call to the cluster API. If it fails on authorization, the
@@ -572,6 +647,74 @@ Resources:
                   chown ec2-user:ec2-user /home/ec2-user/workshop-env.sh
                   grep -q workshop-env.sh /home/ec2-user/.bashrc || \
                     echo 'source /home/ec2-user/workshop-env.sh' >> /home/ec2-user/.bashrc
+          - action: aws:runShellScript
+            name: seedIacMigrationArtefacts
+            inputs:
+              timeoutSeconds: '300'
+              runCommand:
+                - |
+                  # Module 4 artefacts, seeded so the participant opens the IDE with
+                  # something to transform. Deliberately NOT fatal: module 4 is
+                  # optional, and a missing bucket must not fail IDE provisioning.
+                  # No -e for the same reason.
+                  #
+                  # Uses the SAME two document parameters as seedWorkshopAssets. This step
+                  # had its own pair (AssetsBucket / AssetsPrefix); the MR that added
+                  # seedWorkshopAssets renamed the DECLARATIONS and left these two call
+                  # sites pointing at names that no longer existed. SSM rejects the whole
+                  # document over one undeclared parameter, so EVERY deployment failed
+                  # with 'Parameter "AssetsBucket" is not declared' and the IDE stack
+                  # never created. One name per thing from here on.
+                  BUCKET="{{ WorkshopAssetsBucket }}"
+                  PREFIX="{{ AssetsBucketPrefix }}"
+                  if [ -z "$BUCKET" ]; then
+                    echo "SKIP: no assets bucket, module 4 artefacts not seeded"
+                    exit 0
+                  fi
+                  install -d -o ec2-user -g ec2-user /home/ec2-user/environment
+                  # The legacy estate: read-only input for the transformation.
+                  if aws s3 cp "s3://${BUCKET}/${PREFIX}iac-migration/legacy-estate" \
+                       /home/ec2-user/environment/legacy-iac --recursive --quiet; then
+                    echo "OK: legacy estate seeded at ~/environment/legacy-iac"
+                    # atx REQUIRES the target to be a git repository:
+                    #   Fatal error: each package being transformed must be managed
+                    #   by git for atx to operate. Please run 'git init'.
+                    # Measured on atx 3.9.0. A real legacy estate is a git repo
+                    # anyway, so initialising one is also the honest shape.
+                    sudo -u ec2-user git -C /home/ec2-user/environment/legacy-iac \
+                      init -q -b main 2>/dev/null || true
+                    sudo -u ec2-user git -C /home/ec2-user/environment/legacy-iac \
+                      -c user.email=platform@example.com -c user.name="Platform Team" \
+                      add -A 2>/dev/null || true
+                    sudo -u ec2-user git -C /home/ec2-user/environment/legacy-iac \
+                      -c user.email=platform@example.com -c user.name="Platform Team" \
+                      commit -q -m "Payments platform estate, as inherited" 2>/dev/null || true
+                    echo "OK: estate under git ($(sudo -u ec2-user git -C /home/ec2-user/environment/legacy-iac rev-parse --short HEAD 2>/dev/null || echo 'no commit'))"
+                  else
+                    echo "WARN: could not seed the legacy estate"
+                  fi
+                  # The transformation definition. Vendored because the upstream PR
+                  # (aws-samples/aws-transform-custom-samples#74) is still open, so
+                  # cloning aws-samples gives the participant a directory that does
+                  # not exist yet.
+                  #
+                  # README.md and BENCHMARKS.md are EXCLUDED on purpose. `atx custom
+                  # def publish` refuses a definition directory containing anything
+                  # other than SKILL.md, references/ and scripts/:
+                  #   Error: Unsupported file(s) or directory in EXPERIMENTAL_SKILL
+                  #   transformation definition: BENCHMARKS.md, README.md
+                  # Measured on atx 3.9.0. Those two files are documentation for
+                  # people reading the upstream repository, not part of the
+                  # definition.
+                  if aws s3 cp "s3://${BUCKET}/${PREFIX}iac-migration/ack-resource-adoption-from-iac" \
+                       /home/ec2-user/environment/ack-adoption-transformation --recursive --quiet \
+                       --exclude "README.md" --exclude "BENCHMARKS.md"; then
+                    echo "OK: transformation definition seeded"
+                  else
+                    echo "WARN: could not seed the transformation definition"
+                  fi
+                  chown -R ec2-user:ec2-user /home/ec2-user/environment
+                  ls -la /home/ec2-user/environment/ || true
           - action: aws:runShellScript
             name: installGitea
             inputs:
@@ -786,14 +929,23 @@ Resources:
                           '    periodSeconds: 15\n    timeoutSeconds: 5\n'
                           '  resources:\n    requests:\n      cpu: 500m\n      memory: 1Gi', 1)
                       bv.write_text(t)
-                  # 13b. The ALB cert is self-signed (ACME refuses *.elb.amazonaws.com);
-                  #      without this the OIDC discovery kills the boot mid-migration.
-                  t = bv.read_text()
+                  # 13b. O cert do ALB e self-signed (ACME recusa *.elb.amazonaws.com) e o
+                  #      discovery OIDC morre no boot sem o skip de TLS. O skip vai no
+                  #      extraEnvVars do APPSET, nao no values do chart: Helm SUBSTITUI
+                  #      listas em vez de mesclar, e a lista do ApplicationSet apaga a do
+                  #      values (medido no evento 0dbc5e4f - a env nunca chegava ao
+                  #      Deployment). E a falha era circular: sem a env o boot morre no
+                  #      meio da migracao do knex, o Deployment nunca fica Ready, o Argo
+                  #      marca "exceeded its progress deadline", o sync falha, e o values
+                  #      que carrega o proprio fix nunca e aplicado.
+                  av3 = pathlib.Path('packages/addons/values.yaml')
+                  t = av3.read_text()
                   if 'NODE_TLS_REJECT_UNAUTHORIZED' not in t:
-                      t = t.replace('  extraEnvVarsSecrets:\n    - backstage-env-vars',
-                          '  extraEnvVars:\n    - name: NODE_TLS_REJECT_UNAUTHORIZED\n      value: "0"\n'
-                          '  extraEnvVarsSecrets:\n    - backstage-env-vars', 1)
-                      bv.write_text(t)
+                      t = t.replace('      extraEnvVars:\n      - name: BACKSTAGE_FRONTEND_URL',
+                          '      extraEnvVars:\n'
+                          '      - name: NODE_TLS_REJECT_UNAUTHORIZED\n        value: "0"\n'
+                          '      - name: BACKSTAGE_FRONTEND_URL', 1)
+                      av3.write_text(t)
                   # 14. The UrlReader denies hosts outside the allow-list (NotAllowedError) -
                   #     and the templates' catalog location points at the in-cluster Gitea.
                   t = bv.read_text()
@@ -874,6 +1026,14 @@ Resources:
                   PATCHEOF
                   git config user.email workshop@aws && git config user.name "PSP Workshop"
                   git add -A && git commit -q -m "fix: workshop patches - region, bitnamilegacy images, pathRouting eq, repo-server probes" || true
+                  # NUNCA transformar este push em --force. A associacao reaplica a
+                  # cada 30 min, e depois que o participante fizer os commits do
+                  # modulo 5 (templates, catalog-info) este push passa a ser
+                  # rejeitado como non-fast-forward - o que e o comportamento
+                  # CORRETO: o espelho ja foi entregue, o repo agora e do
+                  # participante. Um force push aqui apagaria o trabalho dele a
+                  # cada reapply. O '|| true' existe para engolir exatamente essa
+                  # rejeicao esperada.
                   git push -q http://giteaAdmin:workshop-gitea-2026@localhost:3000/platform/reference-implementation-aws.git HEAD:main 2>/dev/null || true
                   kill $PF 2>/dev/null || true
                   echo "gitea ready: org platform, public mirror of the reference-implementation"
@@ -882,22 +1042,25 @@ Resources:
                   # The URLs CNOE generates in path routing are https://<ALB>/...;
                   # without these 3 pieces the domain serves nothing and every OIDC
                   # consumer (Backstage, Argo Workflows) dies at boot.
-                  ALB_ARN=$(aws elbv2 describe-load-balancers --region "$REGION" \
-                    --query "LoadBalancers[?contains(DNSName, 'psp-alb')].LoadBalancerArn" --output text)
-                  ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns "$ALB_ARN" --region "$REGION" \
+                  # O TG do CNOE vive na VPC2, junto do cluster 2 - e por isso que o
+                  # TargetGroupBinding consegue registrar o pod do nginx (cross-VPC nao
+                  # registra: medido nos eventos fb1c47c8 e 0dbc5e4f).
+                  TG_ARN=$(aws elbv2 describe-target-groups --names "psp-cnoe-tg" --region "$REGION" \
+                    --query 'TargetGroups[0].TargetGroupArn' --output text)
+                  CNOE_ALB_ARN=$(aws elbv2 describe-load-balancers --names "psp-cnoe-alb" --region "$REGION" \
+                    --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+                  ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns "$CNOE_ALB_ARN" --region "$REGION" \
                     --query 'LoadBalancers[0].DNSName' --output text)
-                  TG_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --region "$REGION" \
-                    --query 'Listeners[?Port==`80`].DefaultActions[0].TargetGroupArn | [0]' --output text)
                   # 1) HTTPS:443 listener with a self-signed cert (ACME refuses
                   #    *.elb.amazonaws.com, and an own cert is enough for the lab).
-                  HAS443=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --region "$REGION" \
+                  HAS443=$(aws elbv2 describe-listeners --load-balancer-arn "$CNOE_ALB_ARN" --region "$REGION" \
                     --query 'length(Listeners[?Port==`443`])' --output text)
                   if [ "$HAS443" = "0" ]; then
                     openssl req -x509 -newkey rsa:2048 -keyout /tmp/alb.key -out /tmp/alb.crt \
                       -days 90 -nodes -subj "/CN=${ALB_DNS}" -addext "subjectAltName=DNS:${ALB_DNS}" 2>/dev/null
                     CERT_ARN=$(aws acm import-certificate --certificate fileb:///tmp/alb.crt \
                       --private-key fileb:///tmp/alb.key --region "$REGION" --query CertificateArn --output text)
-                    aws elbv2 create-listener --load-balancer-arn "$ALB_ARN" --protocol HTTPS --port 443 \
+                    aws elbv2 create-listener --load-balancer-arn "$CNOE_ALB_ARN" --protocol HTTPS --port 443 \
                       --certificates CertificateArn="$CERT_ARN" \
                       --default-actions Type=forward,TargetGroupArn="$TG_ARN" --region "$REGION" >/dev/null
                     rm -f /tmp/alb.key /tmp/alb.crt
@@ -907,11 +1070,15 @@ Resources:
                   #    (VPC1 -> VPC2 via peering).
                   SG2=$(aws eks describe-cluster --name psp-cluster-2-cnoe-diy --region "$REGION" \
                     --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+                  # O ALB do CNOE esta na MESMA VPC, entao a origem e o SG dele - nao
+                  # um CIDR de outra VPC.
+                  CNOE_ALB_SG=$(aws elbv2 describe-load-balancers --load-balancer-arns "$CNOE_ALB_ARN" \
+                    --region "$REGION" --query 'LoadBalancers[0].SecurityGroups[0]' --output text)
                   aws ec2 authorize-security-group-ingress --group-id "$SG2" --protocol tcp --port 80 \
-                    --cidr 10.0.0.0/16 --region "$REGION" 2>/dev/null || true
-                  # 3) cluster 2's nginx registers in the ALB TG. AZ=all because the
-                  #    IP belongs to another VPC (peered). The matcher accepts nginx's
-                  #    308 and the health check hits /healthz.
+                    --source-group "$CNOE_ALB_SG" --region "$REGION" 2>/dev/null || true
+                  # 3) o nginx do cluster 2 se registra no TG. Mesma VPC, entao o
+                  #    TargetGroupBinding faz isso sozinho - sem AvailabilityZone=all e
+                  #    sem registro manual, que era o remendo dos eventos anteriores.
                   aws elbv2 modify-target-group --target-group-arn "$TG_ARN" \
                     --matcher HttpCode=200-399 --health-check-path /healthz --region "$REGION" >/dev/null
                   cat <<TGBEOF | kubectl apply -f - >/dev/null
@@ -1121,6 +1288,8 @@ Resources:
         CodeServerVersion: [!Ref CodeServerVersion]
         AtxCliVersion: [!Ref AtxCliVersion]
         GitHubRepoUrl: [!Ref GitHubRepoUrl]
+        WorkshopAssetsBucket: [!Ref WorkshopAssetsBucket]
+        AssetsBucketPrefix: [!Ref AssetsBucketPrefix]
       # Reapplies periodically: the steps are idempotent, so an instance that
       # drifted returns to the expected state without intervention.
       ScheduleExpression: 'rate(30 minutes)'
