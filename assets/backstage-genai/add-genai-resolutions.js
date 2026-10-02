@@ -42,6 +42,37 @@ const path = require('path');
 
 const RESOLUTIONS = {
   '@langchain/ollama': '0.2.1',
+  // @swc/core 1.16.0 is the `latest` tag and the npm registry has QUARANTINED
+  // its platform packages, so any fresh install of the Backstage scaffold dies
+  // at the first `yarn install`, before a single one of our own packages is
+  // added:
+  //
+  //   YN0016: @swc/core-linux-arm64-gnu@npm:1.16.0:
+  //           All versions satisfying "1.16.0" are quarantined
+  //
+  // It is transitive (the scaffold pulls it through @backstage/cli), so nothing
+  // in our Dockerfile asks for it by name and there is no version to bump.
+  // 1.15.47 is the last release before the quarantined one.
+  //
+  // Diagnosis note for whoever revisits this: the first variant to fail was
+  // -linux-arm-gnueabihf, which looks like an architecture problem and is not.
+  // Restricting supportedArchitectures made yarn skip that variant and fail on
+  // -linux-arm64-gnu instead. The whole 1.16.0 release is quarantined; the
+  // architecture was the symptom.
+  //
+  // Remove this pin once 1.16.0 (or a later release) is out of quarantine.
+  '@swc/core': '1.15.47',
+  // @yarnpkg/core 4.9.2 (published 2026-09-24) leaked a LOCAL yarn patch into its
+  // published manifest:
+  //
+  //   "got": "patch:got@npm%3A11.8.2#~/.yarn/patches/got-npm-11.8.2-c1eb105458.patch"
+  //
+  // `~/.yarn/patches/` resolves against OUR project root, where that file does not
+  // exist, so the first `yarn install` of a fresh scaffold dies in the resolution
+  // step with ENOENT on the patch file. It is transitive (via @backstage/cli), and
+  // it failed every event provisioned after the release (measured 2026-09-28).
+  // 4.9.1 declares "got": "^11.7.0". Remove once a fixed release is out.
+  '@yarnpkg/core': '4.9.1',
 };
 
 const root = process.argv[2] || process.cwd();

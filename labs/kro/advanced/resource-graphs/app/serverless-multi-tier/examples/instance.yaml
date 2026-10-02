@@ -10,4 +10,4 @@ spec:
   s3Key: function-python-users-posts.zip
   size: medium
   environment: dev
-  bucketSuffix: REPLACE_WITH_ACCOUNT_ID
+  bucketSuffix: "REPLACE_WITH_ACCOUNT_ID"

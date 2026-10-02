@@ -58,7 +58,7 @@ spec:
                   default: postgres
                 dbEngineVersion:
                   type: string
-                  default: "17.4"
+                  default: "17"
                 storageGB:
                   type: integer
                   default: 20
@@ -66,7 +66,7 @@ spec:
                 # --- Lambda settings ---
                 lambdaRuntime:
                   type: string
-                  default: python3.12
+                  default: python3.14
                 lambdaHandler:
                   type: string
                   default: index.handler
@@ -84,10 +84,10 @@ spec:
                   default: 30
 
                 # --- Frontend settings ---
-                frontendEnabled:
-                  type: boolean
-                  default: true
-                  description: "Enable S3 + CloudFront frontend hosting"
+                # The frontend (S3 bucket + CloudFront distribution) is always part of
+                # this Composition. There is deliberately no frontendEnabled toggle:
+                # function-patch-and-transform cannot create a resource conditionally,
+                # so a boolean here would be accepted and then silently ignored.
                 frontendDefaultRootObject:
                   type: string
                   default: index.html

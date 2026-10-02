@@ -298,7 +298,7 @@ spec:
                 parameters:
                   handler: main.lambda_handler
                   packageType: Zip
-                  runtime: python3.12 #runtime
+                  runtime: python3.14 #runtime
                   timeout: 30
             patches:
               - patchSetName: region

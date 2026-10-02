@@ -1,0 +1,30 @@
+# Crossplane managed resource (provider-aws-iam). Never applied in this workshop.
+#
+# Same team, same story as the bucket next to it. deletionPolicy: Orphan here,
+# so the two managed resources show both delete semantics the report has to
+# reason about.
+apiVersion: iam.aws.upbound.io/v1beta1
+kind: Role
+metadata:
+  name: chargeback-reviewer
+  annotations:
+    crossplane.io/external-name: payments-chargeback-reviewer
+spec:
+  deletionPolicy: Orphan
+  forProvider:
+    assumeRolePolicy: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": "lambda.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    tags:
+      Project: payments
+      Team: chargebacks
+  providerConfigRef:
+    name: default

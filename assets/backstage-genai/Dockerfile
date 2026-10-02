@@ -15,9 +15,10 @@
 #
 # STEPS (the same ones from the official plugin docs, automated)
 #   1. Backstage scaffold with @backstage/create-app (legacy template)
-#   2. yarn install to generate the lockfile
-#   3. Install the 3 GenAI plugin packages
-#   4. Pin a transitive dependency (LangChain) - see add-genai-resolutions.js
+#   2. Restore the pinned dependency snapshot (lock/: package.json x3 + yarn.lock)
+#   3. [REFRESH_LOCK=true only] yarn install + the 3 GenAI plugin packages
+#   4. [REFRESH_LOCK=true only] Pin transitive dependencies - add-genai-resolutions.js
+#      (runs BEFORE step 3, so the lockfile is born with the pins)
 #   5. Patch the 3 files the official docs ask you to edit by hand
 #   6. Type-check + backend build
 #   7. Slim final image, production dependencies only
@@ -70,32 +71,56 @@ WORKDIR /build/backstage
 # Enables the yarn 4 declared in "packageManager" by the scaffold.
 RUN corepack enable && yarn --version
 
-# --- STEP 4 (before the install): pin a transitive dependency ---------------
-# Must come BEFORE any install so the lockfile is born correct.
-COPY build-assets/add-genai-resolutions.js /tmp/add-genai-resolutions.js
-RUN node /tmp/add-genai-resolutions.js /build/backstage
+# --- STEP 2: restore the pinned dependency tree ------------------------------
+# By default the build does NOT resolve dependencies from the registry. It copies
+# in the three package.json files and the yarn.lock of a build that passed end to
+# end in a real workshop account (assets/backstage-genai/lock/), and installs
+# with --immutable. Every transitive package is then the exact version that was
+# validated, so an upstream release cannot change the image between two events.
+# Measured reason: on 2026-09-24 @yarnpkg/core 4.9.2 was published with a broken
+# manifest and failed every event built after it, on an unchanged Dockerfile.
+#
+# REFRESH_LOCK=true re-runs steps 3 and 4 below against the registry to produce a
+# new snapshot. Only do that on purpose, validate the image, then copy the four
+# files back into lock/ (see the README).
+ARG REFRESH_LOCK=false
+COPY build-assets/lock/ /tmp/lock/
+RUN set -eu; \
+    if [ "$REFRESH_LOCK" = "true" ]; then echo "REFRESH_LOCK=true: resolving from the registry."; exit 0; fi; \
+    cp /tmp/lock/package.json ./package.json; \
+    cp /tmp/lock/app.package.json ./packages/app/package.json; \
+    cp /tmp/lock/backend.package.json ./packages/backend/package.json; \
+    cp /tmp/lock/yarn.lock ./yarn.lock; \
+    echo "OK: pinned dependency snapshot restored."
 
-# --- STEPS 2 and 3: lockfile + plugin packages -------------------------------
+# --- STEP 4 (before the install): pin a transitive dependency ---------------
+# Only used by REFRESH_LOCK=true. Must come BEFORE any install so the lockfile is
+# born correct.
+COPY build-assets/add-genai-resolutions.js /tmp/add-genai-resolutions.js
+RUN if [ "$REFRESH_LOCK" = "true" ]; then node /tmp/add-genai-resolutions.js /build/backstage; fi
+
+# --- STEP 3: lockfile + plugin packages (REFRESH_LOCK=true only) -------------
 # CodeBuild sets CI=true, and yarn 4 turns on `enableImmutableInstalls` when
 # CI=true. The steps that NEED to write the lockfile turn the flag off
 # explicitly; the gate that follows turns it back on via --immutable and proves
 # the lockfile is complete and deterministic.
 RUN set -eu; \
+    if [ "$REFRESH_LOCK" != "true" ]; then exit 0; fi; \
     YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install; \
     test -f yarn.lock || { echo "FAILED: yarn install did not produce yarn.lock"; exit 1; }; \
-    echo "OK: yarn.lock generated."
-
-RUN set -eu; \
     YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn workspace backend add \
       @aws/genai-plugin-for-backstage-backend@0.7.1 \
       @aws/genai-plugin-langgraph-agent-for-backstage@0.7.2 \
-      @backstage/plugin-kubernetes-backend; \
+      @backstage/plugin-kubernetes-backend \
+      @roadiehq/backstage-plugin-argo-cd-backend; \
     YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn workspace app add \
       @aws/genai-plugin-for-backstage@0.5.0 \
       @backstage/plugin-kubernetes \
-      @roadiehq/backstage-plugin-argo-cd; \
-    echo "OK: GenAI plugin packages installed."
+      @backstage-community/plugin-redhat-argocd; \
+    echo "OK: lockfile regenerated and GenAI plugin packages installed."
 
+# The gate for both paths: with the pinned snapshot it proves the lockfile
+# matches the manifests exactly and installs nothing that was not validated.
 RUN set -eu; \
     timeout 900 yarn install --immutable; \
     echo "OK: --immutable gate passed (lockfile complete)."

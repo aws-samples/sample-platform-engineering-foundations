@@ -1,0 +1,26 @@
+# Crossplane managed resource (provider-aws-s3). Never applied in this workshop.
+#
+# The chargebacks team adopted Crossplane before the platform team settled on
+# ACK. This bucket already exists in AWS, and Crossplane recorded its physical
+# name in the crossplane.io/external-name annotation after the first reconcile.
+# That annotation is the identifier the transformation uses for the ACK name.
+#
+# deletionPolicy: Delete is deliberate. It is the setting that makes a naive
+# cutover dangerous: while Crossplane still runs, deleting this object deletes
+# the bucket. Expect the report to call it out in its cutover section.
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  name: chargeback-evidence
+  annotations:
+    crossplane.io/external-name: payments-chargeback-evidence-417256
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    tags:
+      Project: payments
+      Team: chargebacks
+      DataClass: confidential
+  providerConfigRef:
+    name: default

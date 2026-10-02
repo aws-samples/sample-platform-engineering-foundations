@@ -15,7 +15,7 @@ spec:
       s3Bucket: string
       s3Key: string
       handler: string | default="main.lambda_handler"
-      runtime: string | default="python3.12"
+      runtime: string | default="python3.14"
       # small=256MB, medium=1024MB, large=2048MB, xlarge=4096MB
       size: string | default="medium"
       timeout: integer | default=30
@@ -23,13 +23,13 @@ spec:
       environmentVariables: "map[string]string"
       environment: string | default="dev"
     status:
-      functionArn: ${function.status.ackResourceMetadata.arn}
-      functionName: ${function.spec.name}
+      functionArn: ${lambdaFn.status.ackResourceMetadata.arn}
+      functionName: ${lambdaFn.spec.name}
 
   resources:
-    - id: function
+    - id: lambdaFn
       readyWhen:
-        - ${function.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+        - ${lambdaFn.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
       template:
         apiVersion: lambda.services.k8s.aws/v1alpha1
         kind: Function

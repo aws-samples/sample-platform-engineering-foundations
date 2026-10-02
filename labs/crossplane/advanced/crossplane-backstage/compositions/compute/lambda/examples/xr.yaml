@@ -15,7 +15,7 @@ spec:
     name: lambda-001
     handler: main.lambda_handler
     packageType: Zip
-    runtime: python3.12
+    runtime: python3.14
     s3Bucket: psp-implementation-lambda-artifactory
     s3Key: function.zip
     timeout: 30

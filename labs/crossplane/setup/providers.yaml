@@ -1,13 +1,11 @@
 ---
-apiVersion: pkg.crossplane.io/v1
-kind: Provider
-metadata:
-  name: provider-family-aws
-spec:
-  package: xpkg.upbound.io/upbound/provider-family-aws:v1.23.1
-  runtimeConfigRef:
-    name: default-drc
----
+# NOTE: do NOT install provider-family-aws explicitly. Each Upbound service
+# provider below depends on the family provider, and Crossplane installs it
+# automatically (as upbound-provider-family-aws). Declaring it here as well
+# creates a duplicate node in the package lock ("node
+# xpkg.upbound.io/upbound/provider-family-aws already exists"), which stalls
+# dependency resolution and leaves the providers stuck HEALTHY=False on
+# Crossplane v2.x core.
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
@@ -76,6 +74,15 @@ kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.16.0
+  # The v0.16.0 tag was pruned from the registry (HTTP 404), which leaves the
+  # provider stuck INSTALLED=False/HEALTHY=False with "cannot resolve ... to
+  # digest". Only the tag is gone - the xpkg.upbound.io/crossplane-contrib/
+  # namespace is still served, so bumping the tag is the whole fix.
+  #
+  # Do NOT "fix" this by moving crossplane-contrib packages to
+  # xpkg.crossplane.io: that registry does not carry all of them. For example
+  # crossplane-contrib/provider-aws:v0.44.0, used by module 4, returns 404
+  # there while it resolves fine on xpkg.upbound.io.
+  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.17.1
   runtimeConfigRef:
     name: default-drc

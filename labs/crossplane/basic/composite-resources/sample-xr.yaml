@@ -14,11 +14,11 @@ spec:
   # RDS
   databaseName: appdb
   dbInstanceClass: db.t3.medium
-  dbEngineVersion: "17.4"
+  dbEngineVersion: "17"
   storageGB: 20
 
   # Lambda
-  lambdaRuntime: python3.12
+  lambdaRuntime: python3.14
   lambdaHandler: index.handler
   lambdaS3Bucket: my-serverless-app-123456789012   # Replace with your S3 bucket
   lambdaS3Key: lambda/backend.zip        # Replace with your package key
@@ -26,7 +26,6 @@ spec:
   lambdaTimeoutSeconds: 30
 
   # Frontend (S3 + CloudFront)
-  frontendEnabled: true
   frontendDefaultRootObject: index.html
   frontendPriceClass: PriceClass_100
 

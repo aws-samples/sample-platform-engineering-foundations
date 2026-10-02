@@ -1,0 +1,11 @@
+# Crossplane claim. Never applied in this workshop.
+#
+# One instantiation of the PartnerDrop API. It becomes one kro instance CR of
+# the Kind the generated ResourceGraphDefinition defines.
+apiVersion: payments.example.org/v1alpha1
+kind: PartnerDrop
+metadata:
+  name: acquirer-a
+  namespace: chargebacks
+spec:
+  partnerName: acquirer-a

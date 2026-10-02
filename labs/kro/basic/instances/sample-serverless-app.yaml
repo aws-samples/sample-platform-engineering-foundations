@@ -13,7 +13,7 @@ spec:
   # RDS
   databaseName: appdb
   dbInstanceClass: db.t3.medium
-  dbEngineVersion: "17.4"
+  dbEngineVersion: "17"
   storageGB: 20
 
   # Lambda

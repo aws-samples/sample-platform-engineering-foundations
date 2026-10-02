@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Legacy estate - payments platform, CloudFormation half. READ-ONLY INPUT for
+  module 4.2: never deployed, only parsed. The nested stack is the point of this
+  file - a nested stack is a composition unit, so the transformation turns it
+  into a kro ResourceGraphDefinition instead of flattening it.
+
+Parameters:
+  Project:
+    Type: String
+    Default: payments
+    Description: Name prefix for every resource in the estate
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+  VpcId:
+    Type: String
+    Default: vpc-0f9e2c41a7b3d58e0
+    Description: >
+      VPC the estate lives in. A literal here, so the transformation can resolve
+      it - unlike the subnet and security group ids below, which only exist
+      after a deploy.
+
+  ArtifactBucketSuffix:
+    Type: String
+    Default: '417256'
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Flat resources. Bucket name and role name live in spec, so both resolve
+  # statically from this template.
+  # ---------------------------------------------------------------------------
+  ReconciliationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Project}-reconciliation-${ArtifactBucketSuffix}'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
+
+  ReconciliationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Project}-reconciliation-runner'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ReconciliationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${Project}-reconciliation'
+      Role: !GetAtt ReconciliationRole.Arn
+      Runtime: python3.13
+      Handler: app.handler
+      MemorySize: 1024
+      Timeout: 300
+      Code:
+        S3Bucket: !Ref ReconciliationBucket
+        S3Key: lambda/reconciliation.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # The composition unit. !Ref and !GetAtt across the boundary become CEL
+  # expressions in the generated RGD.
+  # ---------------------------------------------------------------------------
+  DataTier:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./nested/data-tier.yaml
+      Parameters:
+        Project: !Ref Project
+        Environment: !Ref Environment
+        VpcId: !Ref VpcId
+
+Outputs:
+  ReconciliationBucketName:
+    Description: Bucket holding reconciliation batches
+    Value: !Ref ReconciliationBucket
+
+  DataTierEndpoint:
+    Description: Postgres endpoint produced by the nested stack
+    Value: !GetAtt DataTier.Outputs.DbEndpoint

@@ -11,6 +11,7 @@ a fix to them actually reaches Workshop Studio.
 | `app-config.workshop.yaml` | Runtime overrides: portal URL, catalog paths, CSP |
 | `apply-genai-patches.js` | The three source edits the plugin docs ask for, idempotent |
 | `add-genai-resolutions.js` | Pins a LangChain transitive dependency (see the file for why) |
+| `lock/` | Validated dependency snapshot: root, `app` and `backend` `package.json` plus `yarn.lock`. The Dockerfile restores it and installs with `--immutable`. To refresh: `docker build --target build --build-arg REFRESH_LOCK=true`, copy the four files out of `/build/backstage`, validate the image in an event, then commit |
 | `k8s/backstage.yaml` | Deployment applied by the participant during the lab |
 | `lambda/*/handler.py` | CloudFormation custom resources used by the workshop stack |
 

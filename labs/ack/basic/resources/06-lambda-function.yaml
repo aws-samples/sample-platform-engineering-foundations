@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   name: serverless-app-backend
-  runtime: python3.12
+  runtime: python3.14
   handler: index.handler
   memorySize: 256
   timeout: 30

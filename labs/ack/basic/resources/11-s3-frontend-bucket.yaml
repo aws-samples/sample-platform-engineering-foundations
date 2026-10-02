@@ -6,12 +6,7 @@ metadata:
 spec:
   name: serverless-app-frontend-ACCOUNT_ID    # Replace ACCOUNT_ID for uniqueness
   publicAccessBlock:
-    blockPublicAcls: true
+    blockPublicACLs: true
     blockPublicPolicy: true
-    ignorePublicAcls: true
+    ignorePublicACLs: true
     restrictPublicBuckets: true
-  tags:
-    - key: Environment
-      value: workshop
-    - key: ManagedBy
-      value: ACK

@@ -29,9 +29,9 @@ spec:
         spec:
           name: ${schema.spec.name}
           publicAccessBlock:
-            blockPublicAcls: true
+            blockPublicACLs: true
             blockPublicPolicy: true
-            ignorePublicAcls: true
+            ignorePublicACLs: true
             restrictPublicBuckets: true
           tagging:
             tagSet:

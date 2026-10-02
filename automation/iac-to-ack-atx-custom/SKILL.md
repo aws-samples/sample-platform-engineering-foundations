@@ -1,21 +1,21 @@
 ---
 name: ack-resource-adoption-from-iac
 description: >-
-  Analyzes CloudFormation, Terraform, and Pulumi code to generate ACK
+  Analyzes CloudFormation, Terraform, Pulumi, and Crossplane code to generate ACK
   (AWS Controllers for Kubernetes) adoption manifests that bring existing
   AWS resources under Kubernetes/GitOps management without recreating them.
   Uses the ACK ResourceAdoption feature gate with adopt-or-create policy,
-  and generates kro ResourceGraphDefinitions for reusable modules and
-  stacked/nested components. Trigger: ACK adoption, adopt-or-create,
+  and generates kro ResourceGraphDefinitions for reusable modules, stacked/nested
+  components, and Crossplane Compositions. Trigger: ACK adoption, adopt-or-create,
   migrate IaC to Kubernetes, CloudFormation to ACK, Terraform to ACK,
-  GitOps migration, kro ResourceGraphDefinition.
+  Crossplane to ACK, Composition to kro, GitOps migration, kro ResourceGraphDefinition.
 ---
 
 # ACK Resource Adoption from IaC
 
 ## Objective
 
-Convert existing IaC-managed AWS resources (CloudFormation, Terraform, Pulumi) into ACK adoption manifests so the resources come under Kubernetes/GitOps control **without being recreated, modified, or deleted**. Where the IaC uses reusable modules or nested/stacked structures, generate kro `ResourceGraphDefinition`s that preserve that composition as a first-class Kubernetes API.
+Convert existing IaC-managed AWS resources (CloudFormation, Terraform, Pulumi, Crossplane) into ACK adoption manifests so the resources come under Kubernetes/GitOps control **without being recreated, modified, or deleted**. Where the IaC uses reusable modules or nested/stacked structures, generate kro `ResourceGraphDefinition`s that preserve that composition as a first-class Kubernetes API.
 
 ## Scope
 
@@ -23,6 +23,7 @@ Analyzes:
 - CloudFormation templates (`.yaml`, `.yml`, `.json` with `AWSTemplateFormatVersion` or `Resources:` top-level key), including nested stacks (`AWS::CloudFormation::Stack`)
 - Terraform files (`.tf`, `.tf.json`), including local and registry modules (`module` blocks)
 - Pulumi programs (TypeScript/Python with `@pulumi/aws` or `pulumi_aws` imports)
+- Crossplane manifests: Managed Resources (`*.upbound.io`, `*.aws.crossplane.io`), `Composition` + `CompositeResourceDefinition` (`apiextensions.crossplane.io`), and claim instances (`references/crossplane-to-ack-kro.md`)
 
 Generates:
 - One ACK adoption manifest per supported AWS resource, with `adoption-policy: adopt-or-create`, `deletion-policy: retain`, and `adoption-fields` when the identifier lives in status
@@ -43,6 +44,7 @@ Supported ACK services (initial mapping table in `references/iac-to-ack-mapping.
 - EVERY generated manifest MUST carry `services.k8s.aws/deletion-policy: "retain"`. A missing retain policy can cause real AWS resource deletion when a CR is removed - this is the single most dangerous failure mode of this transformation.
 - EVERY generated manifest MUST use `services.k8s.aws/adoption-policy: "adopt-or-create"` so applying it never fails on an existing resource and never duplicates it.
 - Never generate a manifest with placeholder/guessed identifiers. If the resource identifier cannot be resolved from the IaC (e.g., a Terraform computed value or a CloudFormation `!Ref` chain that requires runtime state), emit the manifest with an explicit `# TODO(discovery):` comment containing the exact AWS CLI discovery command, and list it in the report's "Requires Discovery" section.
+- When an `adoption-fields` identifier is unresolved, the `services.k8s.aws/adoption-fields` annotation itself MUST stay commented out inside the `TODO(discovery)` block. Never emit an active `adoption-fields` annotation carrying a placeholder value (`TODO`, `REPLACE_ME`, or similar) - an active placeholder instructs ACK to adopt a resource by a fake identifier, which either fails adoption or matches the wrong AWS resource. The manifest stays inert for that resource until a human supplies the real value.
 - The source IaC files are never modified.
 
 ### Fidelity
@@ -67,13 +69,17 @@ Supported ACK services (initial mapping table in `references/iac-to-ack-mapping.
 Phase 0: Detect IaC flavor(s)
   ├── CloudFormation: AWSTemplateFormatVersion / Resources: top-level key
   ├── Terraform: .tf files, module blocks, terraform-provider-aws resources
-  └── Pulumi: @pulumi/aws (TS) or pulumi_aws (Python) imports
+  ├── Pulumi: @pulumi/aws (TS) or pulumi_aws (Python) imports
+  └── Crossplane: apiextensions.crossplane.io (XRD/Composition),
+        *.upbound.io / *.aws.crossplane.io (Managed Resources)
 
 Phase 1: Inventory
   ├── Parse every resource declaration into (type, logical name, properties, references)
-  ├── Resolve identifiers: literal values, variable defaults, tfvars files
+  ├── Resolve identifiers: literal values, variable defaults, tfvars files,
+  │     crossplane.io/external-name annotations (highest-fidelity source)
   ├── Mark unresolvable identifiers (computed values, runtime refs) for discovery
-  └── Detect composition units: TF modules, CFN nested stacks, Pulumi components
+  └── Detect composition units: TF modules, CFN nested stacks, Pulumi components,
+        Crossplane Composition + XRD pairs
 
 Phase 2: Map to ACK
   ├── Map each IaC resource type to its ACK apiVersion/Kind
@@ -211,13 +217,14 @@ Load reference files on demand based on what the scan finds:
 | Any supported AWS resource type in the IaC | `references/iac-to-ack-mapping.md` |
 | A mapped Kind whose identifier lives in status (VPC, SQS, SNS, KMS, CloudFront, Route53, MSK, IAM Policy, EC2 network resources) | `references/adoption-fields-ref.md` |
 | Terraform `module` block, CloudFormation `AWS::CloudFormation::Stack`, or Pulumi ComponentResource | `references/kro-patterns.md` |
+| Any `apiextensions.crossplane.io` or `*.upbound.io` / `*.aws.crossplane.io` document | `references/crossplane-to-ack-kro.md` (then `kro-patterns.md` for the RGD shape) |
 | Any resource requiring a concrete before/after example | `references/examples-iac-to-ack.md` |
 
 ## Validation / Exit Criteria
 
 1. Every supported IaC resource has exactly one generated ACK manifest (or one kro RGD slot) - no duplicates, no silent drops.
 2. 100% of generated manifests (including templates inside RGDs) carry both `services.k8s.aws/adoption-policy: "adopt-or-create"` and `services.k8s.aws/deletion-policy: "retain"`.
-3. Every Kind requiring `adoption-fields` has the annotation populated with a resolved identifier, OR carries a `TODO(discovery)` comment with the exact AWS CLI command and appears in the report's "Requires Discovery" section.
+3. Every Kind requiring `adoption-fields` either has the annotation populated with a resolved identifier, OR keeps the annotation fully commented out inside a `TODO(discovery)` block with the exact AWS CLI command and appears in the report's "Requires Discovery" section. No generated file contains an active `adoption-fields` annotation with a placeholder value.
 4. kro RGDs are generated only for genuine composition units; every RGD has at least one instance CR; internal references use CEL expressions, not IaC syntax remnants.
 5. No generated file contains IaC-native syntax (`!Ref`, `!GetAtt`, `${var.`, `${module.`, Pulumi interpolations).
 6. All generated YAML parses cleanly; `kubectl apply --dry-run=client` passes where CRDs are available (skipped gracefully otherwise).

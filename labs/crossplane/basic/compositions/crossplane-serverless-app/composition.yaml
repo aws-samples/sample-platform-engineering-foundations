@@ -120,7 +120,7 @@ spec:
                 forProvider:
                   region: ""
                   engine: postgres
-                  engineVersion: "17.4"
+                  engineVersion: "17"
                   instanceClass: db.t3.medium
                   allocatedStorage: 20
                   dbName: appdb
@@ -263,7 +263,7 @@ spec:
                   name: controlplane
                 forProvider:
                   region: ""
-                  runtime: python3.12
+                  runtime: python3.14
                   handler: index.handler
                   memorySize: 256
                   timeout: 30
@@ -646,6 +646,14 @@ spec:
                 toFieldPath: spec.forProvider.origin[0].domainName
                 policy:
                   fromFieldPath: Required
+              # Frontend inputs from the XRD schema. Without these two patches the
+              # fields exist in the API but change nothing.
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.frontendDefaultRootObject
+                toFieldPath: spec.forProvider.defaultRootObject
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.frontendPriceClass
+                toFieldPath: spec.forProvider.priceClass
 
           # ==========================================================
           # 19. Namespace on cluster-3 (apps cluster)
