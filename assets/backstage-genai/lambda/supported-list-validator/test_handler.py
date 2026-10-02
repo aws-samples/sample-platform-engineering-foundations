@@ -87,9 +87,17 @@ def test_cfn_template_runs_validator_in_every_environment():
     doc = yaml.load(text, Loader=CfnLoader)
     resources = doc.get('Resources', {})
 
+    # No explicit LogGroup on purpose: the function also runs during stack
+    # DELETE, so the runtime would recreate an explicit log group after
+    # CloudFormation deleted it, and the next create in the same account
+    # would fail on a name that already exists.
+    assert 'SupportedListValidatorLogGroup' not in resources, (
+        'explicit LogGroup for a custom-resource Lambda reintroduces the '
+        'NAME_CONFLICT on re-create'
+    )
+
     expected = {
         'SupportedListValidatorRole',
-        'SupportedListValidatorLogGroup',
         'SupportedListValidatorFunction',
         'SupportedListValidator',
     }
