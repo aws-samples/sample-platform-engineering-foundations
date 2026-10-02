@@ -7,11 +7,6 @@ Parameters:
     Default: 'psp'
     Description: 'Name for the workshop resources'
 
-  GitHubRepoUrl:
-    Type: String
-    Default: 'https://github.com/cnoe-io/reference-implementation-aws'
-    Description: 'GitHub repository URL for CNOE reference implementation'
-
   # ----- GenAI plugin parameters -----
   Environment:
     Type: String
@@ -721,6 +716,58 @@ Resources:
       RoleArn: !GetAtt EKSClusterRole.Arn
     DependsOn: EKSCluster1
 
+  # Pod Identity for the two optional Terraform/OpenTofu controllers in module 3.
+  # Both charts run provider code in pods and therefore cannot inherit the IDE's
+  # EC2 instance profile. The original pages either assumed ambient credentials
+  # (Tofu Controller) or copied `aws configure get` into a Secret (KubeVela), which
+  # is empty on an instance-role-only IDE and would also teach static credentials.
+  IaCControllersPodIdentityRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${WorkshopName}-iac-controllers-pod-identity'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      Policies:
+        - PolicyName: workshop-s3-dynamodb
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Terraform providers read far more API surface than the create call:
+              # live validation needed GetBucketPolicy and
+              # DescribeContinuousBackups during refresh/plan. Keep the role bounded
+              # to the two services this optional lab teaches, rather than playing
+              # whack-a-mole with every read the provider adds between releases.
+              - Effect: Allow
+                Action: 's3:*'
+                Resource: '*'
+              - Effect: Allow
+                Action: 'dynamodb:*'
+                Resource: '*'
+
+
+  TofuControllerPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      Namespace: default
+      ServiceAccount: tf-runner
+      RoleArn: !GetAtt IaCControllersPodIdentityRole.Arn
+
+  KubeVelaTerraformControllerPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref EKSCluster2
+      Namespace: vela-system
+      ServiceAccount: tf-controller-service-account
+      RoleArn: !GetAtt IaCControllersPodIdentityRole.Arn
+
   # ========================================
   # EKS Addons
   # ========================================
@@ -1031,7 +1078,7 @@ Resources:
 
   # The ALB lives in VPC1's PUBLIC subnets; without this route its traffic to
   # cluster 2's ingress-nginx (VPC2) dies at routing and every access via
-  # INGRESS_DNS answers 504 (measured in event fb1c47c8).
+  # INGRESS_DNS answers 504 (measured on a real workshop event).
   VPC1PublicToVPC2Route:
     Type: AWS::EC2::Route
     DependsOn: VPCPeering1to2
@@ -1088,6 +1135,18 @@ Resources:
   # Application Load Balancer for CNOE Ingress
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_260
+            comment: >-
+              This is the public ingress the participant opens in a browser, so
+              0.0.0.0/0 on 80 is the intent, not an oversight. Narrowing it would
+              require knowing the participant's source address in advance. Note
+              the contrast with BackstagePortalSecurityGroup, which serves the
+              same role for the Backstage portal and IS restricted to the
+              CloudFront prefix list - that is the pattern to copy when a
+              CloudFront distribution is available.
     Properties:
       GroupDescription: Security group for Workshop ALB
       VpcId: !Ref VPC1
@@ -1146,6 +1205,99 @@ Resources:
         - Key: elbv2.k8s.aws/cluster
           Value: !Sub '${WorkshopName}-cluster-1-platform'
 
+  # ---------------------------------------------------------------------------
+  # CNOE ALB - in VPC2, next to cluster 2.
+  #
+  # Why a second ALB instead of reusing WorkshopALB: the CNOE ingress-nginx runs
+  # on cluster 2 (VPC2) and WorkshopALB lives in VPC1. A TargetGroupBinding does
+  # NOT register an IP from another VPC - measured on real workshop events, where
+  # the target group sat with ZERO targets for 17 hours and every request to the
+  # domain answered 503. The 503 broke the Backstage OIDC discovery in the middle
+  # of the database migration and left the knex lock held: the 'MigrationLocked'
+  # that looked like the defect was three layers further down.
+  #
+  # With the load balancer in the SAME VPC as the workload the TargetGroupBinding
+  # registers the target on its own (target healthy with no intervention), and the
+  # peering route, the cross-VPC security group rule and the manual target
+  # registration with AvailabilityZone=all are no longer needed.
+  # ---------------------------------------------------------------------------
+  CnoeALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${WorkshopName} CNOE ALB - ingress from the internet'
+      VpcId: !Ref VPC2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from the internet
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from the internet
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cnoe-alb-sg'
+
+  CnoeALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # Same invisible dependency as WorkshopALB: internet-facing requires the IGW
+    # to be attached already, and nothing here references the attachment.
+    DependsOn: InternetGatewayAttachment2
+    Properties:
+      Name: !Sub '${WorkshopName}-cnoe-alb'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet2A
+        - !Ref PublicSubnet2B
+      SecurityGroups:
+        - !Ref CnoeALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cnoe-alb'
+
+  CnoeTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${WorkshopName}-cnoe-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC2
+      TargetType: ip
+      HealthCheckEnabled: true
+      # /healthz is the ingress-nginx health endpoint. The matcher accepts 3xx
+      # because nginx answers 308 on any path other than the health one.
+      HealthCheckPath: /healthz
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: '200-399'
+      Tags:
+        - Key: Name
+          Value: !Sub '${WorkshopName}-cnoe-tg'
+
+  CnoeALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_2
+            comment: >-
+              Workshop ingress. The HTTPS listener alongside this one carries a
+              self-signed certificate because ACME refuses to issue for
+              *.elb.amazonaws.com and a Workshop Studio account has no domain.
+              The account is destroyed after the event.
+    Properties:
+      LoadBalancerArn: !Ref CnoeALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref CnoeTargetGroup
+
   DefaultTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -1167,6 +1319,20 @@ Resources:
 
   ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_2
+            comment: >-
+              Workshop ingress. HTTPS on this listener needs a domain plus an ACM
+              certificate, and a Workshop Studio account is issued without either.
+              It carries no participant data beyond the lab applications, exists
+              for the duration of a four-hour event, and the account is destroyed
+              afterwards. Any adaptation of this content for a persistent
+              environment must add a certificate and redirect 80 to 443.
+          - id: CKV_AWS_103
+            comment: >-
+              No TLS listener exists to set a policy on - see CKV_AWS_2 above.
     Properties:
       LoadBalancerArn: !Ref WorkshopALB
       Port: 80
@@ -1215,6 +1381,15 @@ Resources:
   # IAM Role for CodeBuild
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_111
+            comment: >-
+              ecr:GetAuthorizationToken is an account-level action that cannot be
+              scoped to a repository, and the layer-upload actions are evaluated
+              against the repository the token was issued for. The S3 grants in
+              this same role ARE scoped, to the assets bucket only.
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -1340,26 +1515,26 @@ Resources:
           phases:
             pre_build:
               commands:
-                - echo "Build iniciado em `date` - psp-backstage-build"
+                - echo "Build started at `date` - psp-backstage-build"
                 # Source.Type is NO_SOURCE, so the docker build context starts
-                # empty. We pull the versioned build-assets/ tree (Dockerfile,
+                # empty. We bring in the tracked build-assets/ tree (Dockerfile,
                 # configs and patch scripts) from the WorkshopAssetsBucket.
-                - echo "[assets] baixando de s3://$WORKSHOP_ASSETS_BUCKET/${ASSETS_PREFIX}backstage-genai/"
+                - echo "[assets] downloading from s3://$WORKSHOP_ASSETS_BUCKET/${ASSETS_PREFIX}backstage-genai/"
                 - aws s3 cp "s3://${WORKSHOP_ASSETS_BUCKET}/${ASSETS_PREFIX}backstage-genai/" ./build-assets/ --recursive
-                # Prerequisite gates: fail fast, with a clear message, if the
-                # asset upload did not happen or is incomplete.
-                - 'test -f build-assets/Dockerfile || (echo "[assets] ERRO: build-assets/Dockerfile ausente - rode scripts/upload-backstage-genai-assets.sh"; exit 1)'
-                - 'test -f build-assets/app-config.genai.yaml || (echo "[assets] ERRO: build-assets/app-config.genai.yaml ausente"; exit 1)'
-                - 'test -f build-assets/app-config.workshop.yaml || (echo "[assets] ERRO: build-assets/app-config.workshop.yaml ausente"; exit 1)'
-                - 'test -f build-assets/apply-genai-patches.js || (echo "[assets] ERRO: build-assets/apply-genai-patches.js ausente"; exit 1)'
-                - 'test -f build-assets/add-genai-resolutions.js || (echo "[assets] ERRO: build-assets/add-genai-resolutions.js ausente"; exit 1)'
-                - echo "[assets] OK - todos os arquivos de build presentes"
+                # Prerequisite gates: fail fast with a clear message if the
+                # assets upload did not happen or is incomplete.
+                - 'test -f build-assets/Dockerfile || (echo "[assets] ERROR: build-assets/Dockerfile missing - run scripts/upload-backstage-genai-assets.sh"; exit 1)'
+                - 'test -f build-assets/app-config.genai.yaml || (echo "[assets] ERROR: build-assets/app-config.genai.yaml missing"; exit 1)'
+                - 'test -f build-assets/app-config.workshop.yaml || (echo "[assets] ERROR: build-assets/app-config.workshop.yaml missing"; exit 1)'
+                - 'test -f build-assets/apply-genai-patches.js || (echo "[assets] ERROR: build-assets/apply-genai-patches.js missing"; exit 1)'
+                - 'test -f build-assets/add-genai-resolutions.js || (echo "[assets] ERROR: build-assets/add-genai-resolutions.js missing"; exit 1)'
+                - echo "[assets] OK - all build files present"
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
                 - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
                 - IMAGE_TAG=${IMAGE_TAG:-latest}
             build:
               commands:
-                # Stages 1-7 are documented inside the Dockerfile itself:
+                # Steps 1-7 documented inside the Dockerfile itself:
                 # scaffold -> lockfile -> plugin packages -> dependency pin
                 # -> patches -> type-check/build -> final production image.
                 - echo "[build] docker build -f build-assets/Dockerfile"
@@ -1367,7 +1542,7 @@ Resources:
                 - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
             post_build:
               commands:
-                - echo "Build concluido em `date`"
+                - echo "Build finished at `date`"
                 - docker push $REPOSITORY_URI:latest
                 - docker push $REPOSITORY_URI:$IMAGE_TAG
                 - printf '[{"name":"backstage","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
@@ -1413,13 +1588,20 @@ Resources:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                 Resource: !GetAtt BackstageCodeBuildProject.Arn
+              # GetObject for the assets probe: the trigger waits for the build
+              # files to exist in the bucket, and to be current, before it starts
+              # the build (asset publishing has no guaranteed order with the stack).
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${WorkshopAssetsBucket}/${AssetsBucketPrefix}backstage-genai/*'
 
   BackstageBuildTriggerFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${WorkshopName}-backstage-build-trigger'
       Handler: index.handler
-      Runtime: python3.13
+      Runtime: python3.14
       Timeout: 900
       Role: !GetAtt BackstageBuildTriggerRole.Arn
       Code:
@@ -1432,18 +1614,61 @@ Resources:
 
           def handler(event, context):
               # Only Create triggers the build. Update and Delete are no-ops:
-              # deleting the stack should not try to build anything, and an
-              # update to another resource does not need a new image.
+              # deleting the stack must not try to build anything, and an update
+              # of another resource does not need a new image.
               if event["RequestType"] != "Create":
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
                   return
               try:
                   project = event["ResourceProperties"]["ProjectName"]
+                  bucket = event["ResourceProperties"].get("AssetsBucket", "")
+                  prefix = event["ResourceProperties"].get("AssetsPrefix", "")
                   cb = boto3.client("codebuild")
-                  build_id = cb.start_build(projectName=project)["build"]["id"]
-                  print("build iniciado: %s" % build_id)
 
-                  # Leaves margin to respond to CloudFormation before the Lambda
+                  # Wait for the assets to exist before starting the build.
+                  # Workshop Studio publishes the assets bucket independently of
+                  # the stack, and the ordering is not guaranteed: measured on a
+                  # real event, this build started at 02:09 against assets that
+                  # were only (re)published at 03:20 - so the image shipped with
+                  # the previous version of the build files and nothing failed
+                  # loudly. Poll for the one file the buildspec cannot work
+                  # without; give up after ~5 minutes and let the buildspec's own
+                  # test -f produce the explicit error.
+                  if bucket:
+                      s3 = boto3.client("s3")
+                      probe = prefix + "backstage-genai/apply-genai-patches.js"
+                      # PRESENT is not CURRENT. Measured on a real event: the
+                      # bucket held a 4546-byte copy of this script from a commit
+                      # 18 days old, the build succeeded, and the image shipped
+                      # missing two patches with nothing in the logs to say so.
+                      # So the probe checks a MARKER the current script must
+                      # contain, and a stale asset set FAILS the stack instead of
+                      # producing a quietly wrong image.
+                      MARKER = "argo-cd-backend"
+                      fresh = False
+                      for _ in range(20):
+                          try:
+                              body = s3.get_object(Bucket=bucket, Key=probe)["Body"].read().decode("utf-8", "replace")
+                              if MARKER in body:
+                                  print("assets present and current (marker found)")
+                                  fresh = True
+                                  break
+                              print("assets present but STALE (marker %r missing, %d bytes)" % (MARKER, len(body)))
+                          except Exception as exc:
+                              print("assets not readable yet: %s" % exc)
+                          time.sleep(15)
+                      if not fresh:
+                          raise Exception(
+                              "Backstage build assets in s3://%s/%sbackstage-genai/ are missing or "
+                              "stale (marker %r not found). Publish them with "
+                              "scripts/upload-backstage-genai-assets.sh before the image build, "
+                              "then re-run: aws codebuild start-build --project-name %s"
+                              % (bucket, prefix, MARKER, project))
+
+                  build_id = cb.start_build(projectName=project)["build"]["id"]
+                  print("build started: %s" % build_id)
+
+                  # Leaves room to answer CloudFormation before the Lambda
                   # timeout: without it a slow build would leave the stack stuck
                   # waiting for a callback that never arrives.
                   deadline = time.time() + 780
@@ -1454,17 +1679,17 @@ Resources:
                       status = build["buildStatus"]
                       if status in TERMINAL:
                           break
-                  print("status final: %s" % status)
+                  print("final status: %s" % status)
 
                   if status == "SUCCEEDED":
                       cfnresponse.send(event, context, cfnresponse.SUCCESS,
                                        {"BuildId": build_id, "BuildStatus": status})
                   else:
                       cfnresponse.send(event, context, cfnresponse.FAILED, {},
-                                       reason="Build %s terminou como %s. Veja os logs em "
+                                       reason="Build %s finished as %s. See the logs at "
                                               "/aws/codebuild/%s" % (build_id, status, project))
               except Exception as exc:
-                  print("erro: %s" % exc)
+                  print("error: %s" % exc)
                   cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(exc))
 
   BackstageBuildTrigger:
@@ -1473,15 +1698,16 @@ Resources:
     Properties:
       ServiceToken: !GetAtt BackstageBuildTriggerFunction.Arn
       ProjectName: !Ref BackstageCodeBuildProject
+      AssetsBucket: !Ref WorkshopAssetsBucket
+      AssetsPrefix: !Ref AssetsBucketPrefix
 
   # ========================================================================
-  # GenAI plugin - IAM, Pod Identity, Lambdas and Bedrock wiring
+  # GenAI Plugin (Phase 4) - merged from static/genai-plugin-*.yaml (Task 50)
   # ------------------------------------------------------------------------
-  # Cluster reconciliation: these resources were originally authored against a
-  # logical id `WorkshopCluster`. The Backstage Deployment runs on the Apps
-  # Platform cluster, which this template defines as `EKSCluster3`, so every
-  # `!Ref WorkshopCluster` is wired to `!Ref EKSCluster3` below. Keep that in
-  # mind when porting resources in or out of this file.
+  # Cluster reconciliation: the fragments referenced a logical id
+  # `WorkshopCluster`; the Backstage Deployment runs on the Apps Platform
+  # cluster, which this parent template defines as `EKSCluster3`. Every
+  # fragment `!Ref WorkshopCluster` is wired to `!Ref EKSCluster3` below.
   # ========================================================================
 
   # ----- IAM role + EKS Pod Identity (genai-plugin-iam.yaml) --------------
@@ -1636,6 +1862,21 @@ Resources:
 
   BackstagePortalListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_2
+            comment: >-
+              HTTP is correct at this hop. TLS terminates at the CloudFront
+              distribution in front of this ALB, and BackstagePortalSecurityGroup
+              only admits the CloudFront origin-facing prefix list - there is no
+              network path that reaches port 80 without passing through
+              CloudFront over HTTPS. Terminating TLS here as well would require a
+              domain and an ACM certificate the workshop account does not have.
+          - id: CKV_AWS_103
+            comment: >-
+              Same reason: the TLS policy that matters is CloudFront's, which
+              serves TLS 1.2 or better on the *.cloudfront.net certificate.
     Properties:
       LoadBalancerArn: !Ref BackstagePortalLoadBalancer
       Protocol: HTTP
@@ -1740,18 +1981,19 @@ Resources:
                   - aws-marketplace:ViewSubscriptions
                 Resource: '*'
 
-  PrewarmLambdaLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/${WorkshopName}-bedrock-prewarm'
-      RetentionInDays: 7
-
+  # NOTE on log groups: the custom resource Lambdas have NO explicit LogGroup
+  # on purpose. They also run during the stack DELETE (they answer the Delete
+  # event), and the runtime recreates the log group AFTER CloudFormation has
+  # deleted it - leaving an orphan that makes the NEXT create in the same
+  # account fail with NAME_CONFLICT ("LogGroup ... already exists"), including
+  # on a Workshop Studio provisioning retry. An implicit log group (created by
+  # the runtime) does not conflict. Cost: default retention instead of 7 days
+  # - irrelevant in a disposable workshop account.
   PrewarmLambdaFunction:
     Type: AWS::Lambda::Function
-    DependsOn: PrewarmLambdaLogGroup
     Properties:
       FunctionName: !Sub '${WorkshopName}-bedrock-prewarm'
-      Runtime: python3.12
+      Runtime: python3.14
       Handler: handler.handler
       Timeout: 300
       MemorySize: 256
@@ -1804,18 +2046,11 @@ Resources:
                   - bedrock:ListInferenceProfiles
                 Resource: '*'
 
-  SupportedListValidatorLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/${WorkshopName}-supported-list-validator'
-      RetentionInDays: 7
-
   SupportedListValidatorFunction:
     Type: AWS::Lambda::Function
-    DependsOn: SupportedListValidatorLogGroup
     Properties:
       FunctionName: !Sub '${WorkshopName}-supported-list-validator'
-      Runtime: python3.12
+      Runtime: python3.14
       Handler: handler.handler
       Timeout: 60
       MemorySize: 256
@@ -1913,10 +2148,19 @@ Outputs:
       Name: !Sub '${AWS::StackName}-Cluster3Endpoint'
 
   IngressDNS:
-    Description: 'ALB DNS - Use this as INGRESS_DNS for CNOE installation'
+    Description: 'ALB DNS in VPC 1, next to the platform cluster'
     Value: !GetAtt WorkshopALB.DNSName
     Export:
       Name: !Sub '${AWS::StackName}-IngressDNS'
+
+  CnoeIngressDNS:
+    Description: >-
+      CNOE ALB DNS, in the same VPC as cluster 2 - use this as the domain for
+      the CNOE installation. It lives in VPC2 because a TargetGroupBinding
+      cannot register a pod IP from another VPC.
+    Value: !GetAtt CnoeALB.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-CnoeIngressDNS'
 
   IngressGroupName:
     Description: 'Ingress Group Name - Use this in your Ingress annotations'
@@ -1960,11 +2204,16 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-BackstageECRUri'
 
-  # S3 URI of the Backstage deploy manifest. The participant does not have the
-  # workshop repository cloned, so they download the manifest from here during
-  # the lab (Phase 4).
+  # S3 URI of the Backstage deploy manifest. The participant does not have
+  # the workshop repository cloned, so they download the manifest from here
+  # during the lab (Phase 4).
   BackstagePortalUrl:
-    Description: HTTPS URL of the Backstage portal (CloudFront). Available before the lab starts.
+    Description: >-
+      HTTPS URL of the Backstage portal. It EXISTS from provisioning time,
+      but answers 503 until the Backstage manifest is applied during the labs -
+      the ALB has no target before that. This is by design:
+      Backstage needs to know its own public URL (APP_BASE_URL) to generate
+      its bundle paths, so the URL has to exist BEFORE the deploy.
     Value: !Sub 'https://${BackstagePortalDistribution.DomainName}'
 
   BackstageTargetGroupArn:
