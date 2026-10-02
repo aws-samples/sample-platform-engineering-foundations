@@ -1799,8 +1799,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${WorkshopName}-backstage-portal-sg'
-        - Key: auto-delete
-          Value: 'no'
 
   # Allows the portal ALB to reach the Backstage pod. The cluster security
   # group does not know about the ALB, so without this rule the health check
@@ -1833,8 +1831,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${WorkshopName}-backstage-alb'
-        - Key: auto-delete
-          Value: 'no'
 
   BackstagePortalTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -1857,8 +1853,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${WorkshopName}-backstage-tg'
-        - Key: auto-delete
-          Value: 'no'
 
   BackstagePortalListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -1911,9 +1905,6 @@ Resources:
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
           AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-      Tags:
-        - Key: auto-delete
-          Value: 'no'
 
   # Published to Parameter Store so the lab does not depend on the stack name
   # (which changes in Workshop Studio).

@@ -62,7 +62,7 @@ patch('packages/backend/src/index.ts', 'GenAI backend plugins', src => {
   // The create-app scaffold ALREADY registers the kubernetes plugin in recent
   // versions. Registering it twice takes the whole backend down at boot:
   //   ExtensionPoint 'kubernetes.objects-provider' is already registered
-  // (measured in event fb1c47c8). Only add it if the scaffold does not have it.
+  // (measured on a real workshop event). Only add it if the scaffold does not have it.
   if (!src.includes('plugin-kubernetes-backend')) {
     lines.push("// Kubernetes plugin backend: feeds the Kubernetes tab on the entity pages.");
     lines.push("backend.add(import('@backstage/plugin-kubernetes-backend'));");

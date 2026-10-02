@@ -1,4 +1,4 @@
-# Standalone example — requires an existing execution role and S3 package
+# Standalone example - requires an existing execution role and S3 package
 apiVersion: kro.run/v1alpha1
 kind: LambdaFunction
 metadata:

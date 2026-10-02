@@ -1238,9 +1238,6 @@ Resources:
           - Id: expire-logs
             Status: Enabled
             ExpirationInDays: 7
-      Tags:
-        - Key: auto-delete
-          Value: 'no'
 
   # An S3 bucket with objects CANNOT be deleted, and this one receives SSM logs
   # continuously (the association reapplies every 30 min) - in practice it is
@@ -1353,8 +1350,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${WorkshopName}-ide-sg'
-        - Key: auto-delete
-          Value: 'no'
 
   VSCodeEC2:
     Type: AWS::EC2::Instance
@@ -1374,8 +1369,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${WorkshopName}-code-editor'
-        - Key: auto-delete
-          Value: 'no'
 
   IdeSetupAssociation:
     Type: AWS::SSM::Association
@@ -1554,9 +1547,6 @@ Resources:
             OriginCustomHeaders:
               - HeaderName: X-Workshop-Origin-Secret
                 HeaderValue: !GetAtt IdeToken.Password
-      Tags:
-        - Key: auto-delete
-          Value: 'no'
 
   # Publishes the IDE domain so the labs can build URLs for locally exposed
   # services without depending on the stack name.

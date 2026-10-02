@@ -121,7 +121,7 @@ kubernetes:
           caFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
           # EKS Auto Mode ships no metrics-server; without this flag every tab
           # load shows "problem retrieving Kubernetes objects" due to a 404 on
-          # /apis/metrics.k8s.io (measured in event fb1c47c8), even with the
+          # /apis/metrics.k8s.io (measured on a real workshop event), even with the
           # workloads rendering normally.
           skipMetricsLookup: true
 

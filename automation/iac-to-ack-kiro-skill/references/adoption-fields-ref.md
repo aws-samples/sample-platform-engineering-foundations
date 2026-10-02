@@ -1,4 +1,4 @@
-# ACK Adoption Fields — Reference by Service
+# ACK Adoption Fields - Reference by Service
 
 Reference table for the `services.k8s.aws/adoption-fields` annotation.
 
