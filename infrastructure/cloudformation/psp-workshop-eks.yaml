@@ -1702,12 +1702,13 @@ Resources:
       AssetsPrefix: !Ref AssetsBucketPrefix
 
   # ========================================================================
-  # GenAI Plugin (Phase 4) - merged from static/genai-plugin-*.yaml (Task 50)
+  # GenAI plugin - IAM, Pod Identity, Lambdas and Bedrock wiring
   # ------------------------------------------------------------------------
-  # Cluster reconciliation: the fragments referenced a logical id
-  # `WorkshopCluster`; the Backstage Deployment runs on the Apps Platform
-  # cluster, which this parent template defines as `EKSCluster3`. Every
-  # fragment `!Ref WorkshopCluster` is wired to `!Ref EKSCluster3` below.
+  # Cluster reconciliation: these resources were originally authored against a
+  # logical id `WorkshopCluster`. The Backstage Deployment runs on the Apps
+  # Platform cluster, which this template defines as `EKSCluster3`, so every
+  # `!Ref WorkshopCluster` is wired to `!Ref EKSCluster3` below. Keep that in
+  # mind when porting resources in or out of this file.
   # ========================================================================
 
   # ----- IAM role + EKS Pod Identity (genai-plugin-iam.yaml) --------------
@@ -1899,9 +1900,11 @@ Resources:
         DefaultCacheBehavior:
           TargetOriginId: backstage-alb
           ViewerProtocolPolicy: redirect-to-https
-          # CachingDisabled + AllViewer: the portal is dynamic and authenticated,
-          # and the chat relies on streaming - nothing here can be cached, and
-          # every header and cookie needs to reach the origin.
+          # CachingDisabled + AllViewer: the portal is dynamic and the chat relies
+          # on streaming, so nothing here can be cached and every header and cookie
+          # needs to reach the origin. There is NO viewer authentication on this
+          # distribution: Backstage uses guest sign-in, so the CloudFront URL is the
+          # whole access control. See Security and Hardening in the README.
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
           AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]

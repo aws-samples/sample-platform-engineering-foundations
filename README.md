@@ -141,7 +141,7 @@ The commands below are the same sequence, for reference.
 
 | Requirement | Notes |
 |---|---|
-| AWS account | Single account. `AdministratorAccess` or equivalent: the templates create named IAM roles |
+| AWS account | A **dedicated, non-production account** with no other workloads or data, see [Security and Hardening](#security-and-hardening). `AdministratorAccess` or equivalent: the templates create named IAM roles |
 | Region | `us-east-1` is the tested region, see [Known Limitations](#known-limitations) |
 | AWS CLI v2 | Configured with credentials for the target account |
 | Git | To clone this repository |
@@ -504,9 +504,23 @@ This environment is built to **teach**, in a disposable account, for the length 
 of its defaults would be defects in production. They are listed here rather than silently fixed,
 because each one exists to make a lesson visible.
 
+**Deploy it into a dedicated, non-production account.** In an AWS-hosted workshop the account is
+destroyed when the event ends. When you run it self-paced in your own account, **nothing is
+destroyed automatically**: every endpoint below stays reachable until you run [Cleanup](#cleanup).
+
+While the stacks exist, these endpoints are reachable from the internet:
+
+| Endpoint | Protocol | Access control |
+|---|---|---|
+| IDE CloudFront distribution (`IdeUrl`) | HTTPS | Token in the URL, exchanged for a cookie at the edge |
+| Backstage CloudFront distribution | HTTPS | None. Guest sign-in |
+| `psp-alb`, the workshop ingress (Argo CD UI) | HTTP 80 | Argo CD login |
+| `psp-cnoe-alb`, the CNOE ingress (Argo CD, Backstage, Keycloak) | HTTP 80, HTTPS 443 with a self-signed certificate | The login of each application |
+
 | Default | Why it is like that | Before you reuse it |
 |---|---|---|
 | The `IdeUrl` is **pre-authenticated**: possession of the URL is the entire access control | Participants have to reach a working IDE in one click, with no account setup. The origin is not reachable around CloudFront: the instance accepts only the CloudFront prefix list, nginx rejects requests without the distribution-specific header, and code-server listens on loopback only | Put a real identity provider in front of it. Treat the URL as a short-lived secret and delete the stack when you finish |
+| The Backstage portal uses **guest sign-in** and has no viewer authentication on its CloudFront distribution: anyone with the URL is signed in. Its proxy calls Argo CD with a server-side token, and its assistant invokes Amazon Bedrock | Participants reach the portal in one click, without an identity provider to configure | Configure a real Backstage auth provider, or put the IDE's CloudFront Function token pattern in front of the portal. Treat the URL as a secret and delete the stack when you finish, because every visitor can drive Argo CD and spend Bedrock tokens |
 | The IDE instance role has **`AdministratorAccess`** | The labs create and adopt resources across many services from the IDE terminal | Anyone holding the `IdeUrl` holds admin in the account. Scope the role to what your exercises need |
 | The CNOE ingress uses a **self-signed certificate**, and the in-cluster Gitea a **fixed admin password** set by the IDE bootstrap | No domain and no ACM-issued certificate exist in a workshop account, and the Gitea mirror must be ready before the lab | Use a real domain and certificate, and generate the Gitea credentials into Secrets Manager |
 | Platform controllers (ACK, Crossplane) hold **broad IAM** via Pod Identity | The labs provision across many services, so a narrow policy would break them mid-exercise | Scope one role per controller to the resources it actually manages. This is the first thing to change |
