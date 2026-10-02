@@ -478,6 +478,7 @@ Full procedure, including step 5 and the cases that commonly get stuck, in
 | [docs/resources-provisioned.md](docs/resources-provisioned.md) | Every resource each template creates, with parameters and outputs |
 | [docs/cleanup.md](docs/cleanup.md) | Teardown in order, and the cases that get stuck |
 | [docs/diagrams/README.md](docs/diagrams/README.md) | The diagram convention: versioned draw.io sources, the CLI export, and the constraints that keep a figure legible |
+| [docs/reference-architectures/README.md](docs/reference-architectures/README.md) | Reference architectures: GitOps multicluster with Argo CD, platform APIs with kro and ACK, Crossplane compositions, and the CNOE developer portal |
 | [automation/README.md](automation/README.md) | The optional migration module and its two fronts |
 | [scripts/upload-backstage-genai-assets.sh](scripts/upload-backstage-genai-assets.sh) | Packages and uploads the Lambda archives and Backstage build files the main stack consumes |
 | [scripts/upload-lab-assets.sh](scripts/upload-lab-assets.sh) | Publishes `labs/{ack,kro,crossplane}`, which the IDE seeds into `~/environment` |
