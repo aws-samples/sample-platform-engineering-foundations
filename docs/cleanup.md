@@ -58,7 +58,7 @@ orphans in your account.
 kubectl delete -f labs/ack/basic/resources/ --ignore-not-found
 ```
 
-> Anything you adopted following `automation/ack-resource-adoption` should carry
+> Anything you adopted in module 4 (see [`automation/`](../automation/README.md)) should carry
 > `services.k8s.aws/deletion-policy: retain`, so deleting the Kubernetes resource leaves the AWS
 > resource in place. That is intentional. If you also want the AWS resource gone, delete it directly.
 
@@ -100,12 +100,7 @@ aws cloudformation delete-stack --stack-name psp-workshop-eks --region us-east-1
 aws cloudformation wait stack-delete-complete --stack-name psp-workshop-eks --region us-east-1
 ```
 
-The ECR repository must be empty, or deletion fails:
-
-```bash
-aws ecr list-images --repository-name <BackstageECRRepositoryUri basename> --region us-east-1
-aws ecr batch-delete-image --repository-name <name> --image-ids imageTag=latest --region us-east-1
-```
+The ECR repository is created with `EmptyOnDelete: true`, so its images are deleted with the stack.
 
 ---
 
@@ -123,6 +118,33 @@ aws elbv2 describe-load-balancers --region us-east-1 --query 'LoadBalancers[].Lo
 
 Elastic IPs and NAT Gateways are the two that most often survive and keep billing. An unattached
 Elastic IP costs money precisely because it is unattached.
+
+---
+
+## 5. Remove what CloudFormation does not own
+
+Three things outlive both stacks:
+
+- **Log groups** that the custom resource Lambdas and CodeBuild recreate as they run, including
+  during stack deletion. A leftover one also blocks the next deploy in the same account.
+- **The self-signed certificate** the IDE bootstrap imports into ACM for the CNOE HTTPS listener.
+  It costs nothing, but it stays in the account.
+- **The assets bucket** you created before the first deploy.
+
+```bash
+aws logs describe-log-groups --region us-east-1 \
+  --query "logGroups[?contains(logGroupName, 'psp-')].logGroupName" --output text \
+  | tr '\t' '\n' | xargs -I{} aws logs delete-log-group --log-group-name {} --region us-east-1
+
+# Imported certificates not in use by any load balancer
+aws acm list-certificates --region us-east-1 --includes keyTypes=RSA_2048 \
+  --query "CertificateSummaryList[?Type=='IMPORTED' && InUse==\`false\`].[CertificateArn,DomainName]" \
+  --output text
+# Delete the one whose domain ends in .elb.amazonaws.com:
+#   aws acm delete-certificate --certificate-arn <arn> --region us-east-1
+
+aws s3 rb s3://<your-assets-bucket> --force
+```
 
 ---
 
