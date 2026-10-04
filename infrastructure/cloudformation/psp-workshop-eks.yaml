@@ -62,10 +62,23 @@ Parameters:
       manual deploys leave it empty, which is the layout produced by the
       repository scripts.
 
+  CreateIdentityCenterInstance:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >-
+      Create the account-level IAM Identity Center instance (psp-workshop-idc)
+      that the managed Argo CD capability in section 2.1 signs in through. It
+      lives in this stack because Workshop Studio accounts deny
+      sso:CreateInstance to every role except the one that deploys the event
+      stacks. Set 'false' only if the account already has an Identity Center
+      instance you want 2.1 to use - an account holds at most one.
+
 Conditions:
   # Gate the environment-specific resources: the tagging custom resources exist
   # only in dev, the supported-model validator only in prod.
   IsProdEnvironment: !Equals [!Ref Environment, prod]
+  CreateIdentityCenter: !Equals [!Ref CreateIdentityCenterInstance, 'true']
 
 # AWS managed prefix lists holding the IPs of the CloudFront origin-facing
 # servers. Used so that the portal ALB accepts traffic ONLY from CloudFront, and
@@ -94,6 +107,20 @@ Mappings:
       PrefixList: pl-4fa04526
 
 Resources:
+  # IAM Identity Center instance for the managed Argo CD capability (2.1).
+  # Created here, not by the participant: the Workshop Studio SCP denies
+  # sso:CreateInstance to every role except WSSystemRole (which deploys this
+  # stack) and WSOpsRole. The participant still creates the workshop-admin user,
+  # since identitystore:CreateUser is not restricted.
+  WorkshopIdentityCenter:
+    Type: AWS::SSO::Instance
+    Condition: CreateIdentityCenter
+    Properties:
+      Name: psp-workshop-idc
+      Tags:
+        - Key: auto-delete
+          Value: 'no'
+
   # ========================================
   # VPC 1 - EKS Capabilities Cluster
   # ========================================
@@ -2105,6 +2132,16 @@ Resources:
       Description: 'Public Subnet 1B ID for CNOE Workshop'
 
 Outputs:
+  IdentityCenterInstanceArn:
+    Condition: CreateIdentityCenter
+    Description: 'IAM Identity Center instance used by the managed Argo CD capability (2.1)'
+    Value: !GetAtt WorkshopIdentityCenter.InstanceArn
+
+  IdentityCenterStoreId:
+    Condition: CreateIdentityCenter
+    Description: 'Identity store of the workshop Identity Center instance'
+    Value: !GetAtt WorkshopIdentityCenter.IdentityStoreId
+
   Cluster1Name:
     Description: 'EKS Cluster 1 Name (Capabilities)'
     Value: !Ref EKSCluster1
