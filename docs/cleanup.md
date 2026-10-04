@@ -104,6 +104,8 @@ The ECR repository is created with `EmptyOnDelete: true`, so its images are dele
 
 ---
 
+If the stack ends in `DELETE_FAILED` on `CnoeTargetGroup` with `currently in use by a listener`, run the same `delete-stack` again. The IDE adds an HTTPS listener to the CNOE load balancer outside CloudFormation, so the first attempt can reach the target group before the load balancer is gone; the second attempt completes.
+
 ## 4. Verify
 
 ```bash
