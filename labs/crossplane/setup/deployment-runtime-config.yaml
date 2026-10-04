@@ -17,3 +17,12 @@ spec:
                 - '--leader-election'
                 - '--poll=5m'
                 - '--max-reconcile-rate=1'
+              # Requests make EKS Auto Mode provision capacity for the providers. Without
+              # them a dozen providers pack onto one small node, starve for CPU, lose
+              # leader election and stop serving their conversion webhooks.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
