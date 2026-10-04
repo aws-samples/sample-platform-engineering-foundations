@@ -72,8 +72,7 @@ Parameters:
       Default 'false': in your own account section 2.1 creates it from the
       terminal. 'true' fails the stack in an AWS Organization member account
       whose management account disables account-level instances (measured).
-      AWS-hosted events set it to 'true', because there the participant is
-      denied sso:CreateInstance.
+      AWS-hosted workshop events set it to 'true'.
 
 Conditions:
   # Gate the environment-specific resources: the tagging custom resources exist
@@ -109,10 +108,9 @@ Mappings:
 
 Resources:
   # IAM Identity Center instance for the managed Argo CD capability (2.1).
-  # Created here, not by the participant: the Workshop Studio SCP denies
-  # sso:CreateInstance to every role except WSSystemRole (which deploys this
-  # stack) and WSOpsRole. The participant still creates the workshop-admin user,
-  # since identitystore:CreateUser is not restricted.
+  # Optional (CreateIdentityCenterInstance). In your own account section 2.1
+  # creates the instance from the terminal instead; either way the participant
+  # creates the workshop-admin user.
   WorkshopIdentityCenter:
     Type: AWS::SSO::Instance
     Condition: CreateIdentityCenter
