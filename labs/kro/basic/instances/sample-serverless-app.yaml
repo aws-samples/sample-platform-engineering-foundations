@@ -1,9 +1,10 @@
 apiVersion: kro.run/v1alpha1
 kind: ServerlessApp
 metadata:
-  name: my-serverless-app
+  name: kro-serverless-app
 spec:
-  appName: my-serverless-app
+  appName: kro-serverless-app
+  bucketSuffix: "123456789012"           # Replace with your AWS account ID
   region: us-east-1
   environment: dev
   vpcId: vpc-0c51c453190940bb9          # Replace with your VPC ID
@@ -17,7 +18,7 @@ spec:
   storageGB: 20
 
   # Lambda
-  lambdaS3Bucket: my-serverless-app-ACCOUNT_ID   # Replace with your S3 bucket
+  lambdaS3Bucket: kro-serverless-app-ACCOUNT_ID   # Replace with your S3 bucket
   lambdaS3Key: lambda/backend.zip
   lambdaMemoryMB: 256
   lambdaTimeoutSeconds: 30

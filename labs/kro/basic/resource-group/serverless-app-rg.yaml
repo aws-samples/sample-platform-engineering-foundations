@@ -9,6 +9,8 @@ spec:
     spec:
       # --- Application settings ---
       appName: string
+      # S3 bucket names are global across all AWS accounts - append the account ID
+      bucketSuffix: string
       region: string | default="us-east-1"
       environment: string | default="dev"
 
@@ -271,7 +273,7 @@ spec:
         metadata:
           name: ${schema.spec.appName}-frontend
         spec:
-          name: ${schema.spec.appName}-frontend
+          name: ${schema.spec.appName}-frontend-${schema.spec.bucketSuffix}
           publicAccessBlock:
             blockPublicACLs: true
             blockPublicPolicy: true
