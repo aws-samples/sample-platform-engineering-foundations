@@ -234,11 +234,11 @@ in CodeBuild from the files you published, so the portal image is in ECR before 
 > stack back. On `dev` the identity that creates the clusters keeps implicit admin, and everything
 > else, including the Bedrock model validation, is created either way.
 
-> **The stack also creates an IAM Identity Center instance** (`psp-workshop-idc`), which the
-> managed Argo CD capability in section 2.1 signs in through. An account holds at most one
-> account-level instance, so if yours already has one, add `CreateIdentityCenterInstance=false`
-> to the parameter overrides and use your existing instance in 2.1. Deleting the stack removes
-> the instance it created.
+> **IAM Identity Center for section 2.1.** The managed Argo CD capability signs in through an
+> Identity Center instance. In your own account section 2.1 creates it from the terminal, so you
+> pass nothing here. `CreateIdentityCenterInstance=true` makes the stack create it instead, and
+> fails the stack in an AWS Organization member account whose management account disables
+> account-level instances.
 
 ### 4. Deploy the browser IDE
 

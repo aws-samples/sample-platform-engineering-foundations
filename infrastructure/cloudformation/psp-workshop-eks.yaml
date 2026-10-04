@@ -65,14 +65,15 @@ Parameters:
   CreateIdentityCenterInstance:
     Type: String
     AllowedValues: ['true', 'false']
-    Default: 'true'
+    Default: 'false'
     Description: >-
       Create the account-level IAM Identity Center instance (psp-workshop-idc)
-      that the managed Argo CD capability in section 2.1 signs in through. It
-      lives in this stack because Workshop Studio accounts deny
-      sso:CreateInstance to every role except the one that deploys the event
-      stacks. Set 'false' only if the account already has an Identity Center
-      instance you want 2.1 to use - an account holds at most one.
+      that the managed Argo CD capability in section 2.1 signs in through.
+      Default 'false': in your own account section 2.1 creates it from the
+      terminal. 'true' fails the stack in an AWS Organization member account
+      whose management account disables account-level instances (measured).
+      AWS-hosted events set it to 'true', because there the participant is
+      denied sso:CreateInstance.
 
 Conditions:
   # Gate the environment-specific resources: the tagging custom resources exist
