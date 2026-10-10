@@ -1,11 +1,22 @@
 ---
-# NOTE: do NOT install provider-family-aws explicitly. Each Upbound service
-# provider below depends on the family provider, and Crossplane installs it
-# automatically (as upbound-provider-family-aws). Declaring it here as well
-# creates a duplicate node in the package lock ("node
-# xpkg.upbound.io/upbound/provider-family-aws already exists"), which stalls
-# dependency resolution and leaves the providers stuck HEALTHY=False on
-# Crossplane v2.x core.
+# The family provider is declared explicitly and PINNED, under the exact name Crossplane
+# gives it when it installs it as a dependency (upbound-provider-family-aws). Every service
+# provider below depends on it with the constraint ">= 0.0.0", so when it is left implicit
+# Crossplane resolves it to the newest family release. Measured on 2026-10-09: that pulled
+# provider-family-aws v2.9.0 next to v1.23.1 service providers, and those service providers
+# came up Healthy but never opened their webhook (9443) or metrics (8080) port and never
+# logged a line, so every Composition failed with "conversion webhook ... connection refused".
+# Using the same name keeps it a single node in the package lock (a second Provider object
+# with a different name for the same package is what caused the old duplicate-node error).
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-aws
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-aws:v1.23.1
+  runtimeConfigRef:
+    name: default-drc
+---
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:

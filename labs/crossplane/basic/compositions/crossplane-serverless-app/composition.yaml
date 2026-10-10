@@ -113,7 +113,9 @@ spec:
               metadata:
                 labels:
                   awsblueprints.io/resource: rds-instance
-                name: rds-instance
+                # No fixed metadata.name: the AWS identifier comes from appName (patch
+                # below), and a fixed object name let only the first XR in the cluster own
+                # a database, so team-a in 2.4.4 never got one.
               spec:
                 providerConfigRef:
                   name: controlplane
@@ -443,7 +445,12 @@ spec:
               metadata:
                 labels:
                   awsblueprints.io/resource: api-gateway-stage
-                name: "prod"
+                # The AWS stage is still called "prod" (external-name). The object name is
+                # left to Crossplane, like every other resource here: a fixed metadata.name
+                # made the first XR own a single "prod" object, so a second XR in the same
+                # cluster (team-a in 2.4.4) never got a stage and its API never answered.
+                annotations:
+                  crossplane.io/external-name: prod
               spec:
                 providerConfigRef:
                   name: controlplane

@@ -367,7 +367,7 @@ spec:
                 parameters:
                   endpointType: REGIONAL
                   stageName: dev
-                  logRetentionPeriod: 15
+                  logRetentionPeriod: 14
                   logLevel: INFO
             patches:
               - patchSetName: region

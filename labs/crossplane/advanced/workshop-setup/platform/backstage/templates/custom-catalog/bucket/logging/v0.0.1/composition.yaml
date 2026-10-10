@@ -46,6 +46,10 @@ spec:
               metadata:
                 labels:
                   resource: logging-bucket
+              spec:
+                forProvider:
+                  # the bucket receives access logs, so it is never empty at cleanup time
+                  forceDestroy: true
             patches:
               - patchSetName: region
                 type: PatchSet
