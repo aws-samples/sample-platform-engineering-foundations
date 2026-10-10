@@ -1,8 +1,17 @@
 ---
+# The family provider is declared explicitly and PINNED, under the exact name Crossplane
+# gives it when it installs it as a dependency (upbound-provider-family-aws). Every service
+# provider below depends on it with the constraint ">= 0.0.0", so when it is left implicit
+# Crossplane resolves it to the newest family release. Measured on 2026-10-09: that pulled
+# provider-family-aws v2.9.0 next to v1.23.1 service providers, and those service providers
+# came up Healthy but never opened their webhook (9443) or metrics (8080) port and never
+# logged a line, so every Composition failed with "conversion webhook ... connection refused".
+# Using the same name keeps it a single node in the package lock (a second Provider object
+# with a different name for the same package is what caused the old duplicate-node error).
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
-  name: provider-family-aws
+  name: upbound-provider-family-aws
 spec:
   package: xpkg.upbound.io/upbound/provider-family-aws:v1.23.1
   runtimeConfigRef:
@@ -76,6 +85,15 @@ kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.16.0
+  # The v0.16.0 tag was pruned from the registry (HTTP 404), which leaves the
+  # provider stuck INSTALLED=False/HEALTHY=False with "cannot resolve ... to
+  # digest". Only the tag is gone - the xpkg.upbound.io/crossplane-contrib/
+  # namespace is still served, so bumping the tag is the whole fix.
+  #
+  # Do NOT "fix" this by moving crossplane-contrib packages to
+  # xpkg.crossplane.io: that registry does not carry all of them. For example
+  # crossplane-contrib/provider-aws:v0.44.0, used by module 4, returns 404
+  # there while it resolves fine on xpkg.upbound.io.
+  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.17.1
   runtimeConfigRef:
     name: default-drc

@@ -2,7 +2,7 @@
 # =============================================================================
 # upload-backstage-genai-assets.sh
 # =============================================================================
-# Publishes to the WorkshopAssetsBucket everything the stack and the labs read
+# Publishes to the WorkshopAssetsBucket what the psp-workshop-eks stack reads
 # from S3:
 #
 #   assets/backstage-genai/  -> s3://<bucket>/<prefix>backstage-genai/
@@ -11,8 +11,10 @@
 #   assets/.../lambda/*      -> s3://<bucket>/<prefix>lambda/<name>.zip
 #                               (referenced by the CloudFormation custom
 #                                resources)
-#   labs/{ack,kro,crossplane}-> s3://<bucket>/<prefix>{ack,kro,crossplane}/
-#                               (read by modules 1 and 2)
+#
+# The lab trees and the module 4 artefacts are published by their own scripts,
+# upload-lab-assets.sh and upload-iac-migration-assets.sh. Run all three before
+# deploying the stacks.
 #
 # USAGE
 #   ./scripts/upload-backstage-genai-assets.sh <bucket> [region] [aws-profile] [prefix]
@@ -51,6 +53,13 @@ REQUIRED=(
   apply-genai-patches.js
   app-config.genai.yaml
   app-config.workshop.yaml
+  # The validated dependency snapshot. The Dockerfile restores these four files
+  # and installs with --immutable, so the image is built from the exact package
+  # versions that passed end to end instead of whatever the registry serves today.
+  lock/package.json
+  lock/app.package.json
+  lock/backend.package.json
+  lock/yarn.lock
 )
 
 echo "[upload] source:      ${SRC}"
@@ -102,25 +111,6 @@ for fn in prewarm supported-list-validator; do
     --region "$REGION" ${PROFILE_ARG[@]+"${PROFILE_ARG[@]}"}
 done
 echo "[upload] 2 Lambda zips published to ${LAMBDA_DEST}/"
-
-# -----------------------------------------------------------------------------
-# Lab manifests
-# -----------------------------------------------------------------------------
-# Modules 1 and 2 read their manifests from <prefix>ack/, <prefix>kro/ and
-# <prefix>crossplane/ in this same bucket - in an AWS-hosted event that content
-# arrives with the workshop assets, so a standalone deploy has to publish it
-# here or a step several modules in fails on a missing file.
-LABS_SRC="${REPO_ROOT}/labs"
-for d in ack kro crossplane; do
-  if [[ ! -d "${LABS_SRC}/${d}" ]]; then
-    echo "ERROR: lab directory missing: labs/${d}" >&2
-    exit 1
-  fi
-  aws s3 sync "${LABS_SRC}/${d}" "s3://${BUCKET}/${PREFIX}${d}" \
-    --region "$REGION" --delete --only-show-errors \
-    ${PROFILE_ARG[@]+"${PROFILE_ARG[@]}"}
-done
-echo "[upload] lab manifests published to s3://${BUCKET}/${PREFIX}{ack,kro,crossplane}/"
 
 echo "[upload] done. To build the image:"
 echo "  aws codebuild start-build --project-name psp-backstage-build --region ${REGION}"

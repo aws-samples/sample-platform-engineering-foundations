@@ -21,6 +21,20 @@ Both produce the same shape of artefact and follow the same two non-negotiable r
 `adopt-or-create` adoption policy, and `deletion-policy: retain` on every manifest so deleting a
 Kubernetes object never deletes the AWS resource behind it.
 
+## What the workshop IDE gets from this folder
+
+Module 4 of the workshop runs inside the browser IDE, which seeds two directories from the assets
+bucket at provisioning time. `scripts/upload-iac-migration-assets.sh` publishes them:
+
+| In this repository | Bucket key | In the IDE |
+|---|---|---|
+| [`legacy-estate/`](legacy-estate) | `iac-migration/legacy-estate/` | `~/environment/legacy-iac` (initialised as a git repository) |
+| [`iac-to-ack-atx-custom/`](iac-to-ack-atx-custom) | `iac-migration/ack-resource-adoption-from-iac/` | `~/environment/ack-adoption-transformation` (without `README.md` and `BENCHMARKS.md`) |
+
+The estate is a small payments platform in Terraform, CloudFormation and Crossplane, written to be
+read and transformed, **never applied**. Its security findings are deliberate; see
+[legacy-estate/README.md](legacy-estate/README.md).
+
 **Suggested path.** Do one resource by hand with the Kiro Skill first. Adoption has a failure mode
 that is easy to hit and hard to diagnose from a batch report, and doing it once manually makes the
 batch output legible. Then run the ATX transformation across the real repository.
@@ -58,28 +72,37 @@ to guess.
 iac-to-ack-atx-custom/
 ├── README.md          overview, usage, troubleshooting
 ├── SKILL.md           the transformation definition
-├── BENCHMARKS.md      end-to-end results across Terraform, CloudFormation, and Pulumi
+├── BENCHMARKS.md      end-to-end results across Terraform, CloudFormation, Pulumi and Crossplane
 └── references/
-    ├── iac-to-ack-mapping.md    IaC resource type to ACK Kind, 26 types
-    ├── adoption-fields-ref.md   per-Kind identifier reference with discovery commands
-    ├── kro-patterns.md          module and nested stack to RGD translation rules
-    └── examples-iac-to-ack.md   6 worked before and after examples
+    ├── iac-to-ack-mapping.md      IaC resource type to ACK Kind
+    ├── adoption-fields-ref.md     per-Kind identifier reference with discovery commands
+    ├── kro-patterns.md            module and nested stack to RGD translation rules
+    ├── crossplane-to-ack-kro.md   Crossplane managed resources and Compositions to ACK and kro
+    └── examples-iac-to-ack.md     worked before and after examples
 ```
 
 **Prerequisites:** the AWS Transform CLI
 (`curl -fsSL https://transform-cli.awsstatic.com/install.sh | bash`), Node.js 22 or later, a Git
 repository with at least one commit, and AWS credentials carrying
-`AWSTransformCustomExecuteTransformations` or `AWSTransformCustomFullAccess`.
+`AWSTransformCustomExecuteTransformations` or `AWSTransformCustomFullAccess`. The workshop IDE
+installs `atx` 3.9.0 for you.
 
 **Region note for South America.** AWS Transform custom runs in `us-east-1`, `eu-central-1`,
 `eu-west-2`, `ca-central-1`, `ap-northeast-1`, `ap-northeast-2`, `ap-southeast-2`, and `ap-south-1`.
 It is **not available in `sa-east-1`**. Set `AWS_REGION=us-east-1` for the transformation: it reads
 your code, not your clusters, so where your workloads run is unaffected.
 
+`atx custom def publish` rejects a definition directory that contains anything other than
+`SKILL.md`, `references/` and `scripts/`, so publish from a copy without the two documentation files
+(the workshop IDE already has one, at `~/environment/ack-adoption-transformation`):
+
 ```bash
+mkdir -p /tmp/ack-adoption-def
+cp -R iac-to-ack-atx-custom/SKILL.md iac-to-ack-atx-custom/references /tmp/ack-adoption-def/
+
 atx custom def publish -n ack-resource-adoption-from-iac \
-    --sd iac-to-ack-atx-custom \
-    --description "Generates ACK adoption manifests and kro RGDs from existing CloudFormation, Terraform, and Pulumi code"
+    --sd /tmp/ack-adoption-def \
+    --description "Generates ACK adoption manifests and kro RGDs from CloudFormation, Terraform, Pulumi and Crossplane"
 
 atx custom def exec -n ack-resource-adoption-from-iac -p /path/to/your-iac-repo -x -t
 ```
@@ -89,13 +112,14 @@ atx custom def exec -n ack-resource-adoption-from-iac -p /path/to/your-iac-repo 
 
 ### Source
 
-Taken from the AWS Transform custom samples submission, pinned so the local copy is reproducible.
+Vendored from the AWS Transform custom samples, pinned so the workshop does not change under you
+when upstream moves. For your own migrations, start from the upstream version.
 
 | | |
 |---|---|
-| Upstream PR | [aws-samples/aws-transform-custom-samples#74](https://github.com/aws-samples/aws-transform-custom-samples/pull/74) |
-| Commit | `a4db209bf8653d1886a57a1ab4c9785ba0f3eba1` |
-| Status | Open at the time of vendoring. Refresh this copy once it merges |
+| Upstream | [aws-transform-custom-samples, `community-sourced-transformations/ack-resource-adoption-from-iac`](https://github.com/aws-samples/aws-transform-custom-samples/tree/main/community-sourced-transformations/ack-resource-adoption-from-iac) |
+| Introduced by | [aws-samples/aws-transform-custom-samples#74](https://github.com/aws-samples/aws-transform-custom-samples/pull/74) |
+| Synced with | upstream commit `02f758b` (adds Crossplane as the fourth IaC flavor) |
 
 ---
 

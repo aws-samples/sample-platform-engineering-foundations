@@ -1,5 +1,5 @@
 # Application API: serverless multi-tier app
-# NESTED resource graph — its resources are instances of OTHER
+# NESTED resource graph - its resources are instances of OTHER
 # ResourceGraphDefinitions (DynamoDBTable, LambdaFunction, WebAPI,
 # StaticSite), plus one direct ACK IAM Role for the glue.
 #

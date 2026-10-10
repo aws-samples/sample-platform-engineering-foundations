@@ -1,0 +1,38 @@
+# Crossplane CompositeResourceDefinition. Never applied in this workshop.
+#
+# The platform API the chargebacks team offers other teams: "give me a drop
+# zone for a card-network partner". This XRD is the schema; the Composition next
+# to it is the implementation. Together they are a composition unit, the same
+# class as a Terraform module or a CloudFormation nested stack, so they become a
+# kro ResourceGraphDefinition, not loose manifests.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xpartnerdrops.payments.example.org
+spec:
+  group: payments.example.org
+  names:
+    kind: XPartnerDrop
+    plural: xpartnerdrops
+  claimNames:
+    kind: PartnerDrop
+    plural: partnerdrops
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                partnerName:
+                  type: string
+                  description: Short partner id, used in every physical name
+                owningTeam:
+                  type: string
+                  default: chargebacks
+              required:
+                - partnerName

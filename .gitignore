@@ -410,3 +410,8 @@ __pycache__/
 # a repository without them breaks the lab. The archive template above ignores
 # *.zip wholesale, hence the negation.
 !labs/**/*.zip
+
+# The module 4 legacy estate is read-only lab INPUT, never applied. Its
+# terraform.tfvars is one of the identifier sources the transformation reads
+# (no secrets in it), so the Terraform template's *.tfvars rule must not drop it.
+!automation/legacy-estate/**/*.tfvars

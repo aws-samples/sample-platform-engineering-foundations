@@ -16,13 +16,13 @@ The source tool (Terraform, CFN, Pulumi, Click-Ops) is irrelevant - ACK reads th
 
 ---
 
-## Step 0 — Validate ACK Documentation Freshness (MANDATORY)
+## Step 0 - Validate ACK Documentation Freshness (MANDATORY)
 
 Run BEFORE generating any adoption manifest. ACK ships new fields without bumping the API
 version, so a manifest written from a stale skill snapshot can fail reconciliation with
 `Terminal: True` after apply. This step is non-skippable.
 
-### 0.1 — Service controllers matrix
+### 0.1 - Service controllers matrix
 
 Fetch and inspect the [ACK service controllers status](https://aws-controllers-k8s.github.io/community/docs/community/services/) page:
 
@@ -33,7 +33,7 @@ Fetch and inspect the [ACK service controllers status](https://aws-controllers-k
    - **MAINTENANCE** → community-supported, validate carefully.
 3. If the service is missing or in PREVIEW/MAINTENANCE → flag this in the output before proceeding.
 
-### 0.2 — Per-service schema diff (current vs. skill examples)
+### 0.2 - Per-service schema diff (current vs. skill examples)
 
 For the target Kind, fetch the current API definition from the upstream repo:
 
@@ -52,7 +52,7 @@ Compare against the example in this skill:
 | New optional field with adoption value (e.g., new identifier in status) | Update `references/adoption-fields-ref.md` |
 | API version bumped (e.g., v1alpha1 → v1beta1) | Update `apiVersion` in manifest + flag |
 
-### 0.3 — Record freshness in generated YAML
+### 0.3 - Record freshness in generated YAML
 
 Add a comment header to the generated manifest with the validation timestamp:
 
@@ -103,7 +103,7 @@ helm upgrade ack-$SERVICE-controller \
 
 ---
 
-## Step 1 — Discovery: find the resource identifier
+## Step 1 - Discovery: find the resource identifier
 
 Query AWS to get the exact identifier needed in `adoption-fields`.
 See full reference table in `references/adoption-fields-ref.md`.
@@ -122,7 +122,7 @@ aws iam list-roles --query 'Roles[*].{Name:RoleName,ARN:Arn}'
 
 ---
 
-## Step 2 — Manifest with adopt-or-create
+## Step 2 - Manifest with adopt-or-create
 
 ### Required pattern
 
@@ -253,7 +253,7 @@ spec:
 
 ---
 
-## Step 3 — Apply
+## Step 3 - Apply
 
 ```bash
 kubectl apply -f resource.yaml
@@ -264,7 +264,7 @@ kubectl get <kind> <name> -w
 
 ---
 
-## Step 4 — Validate Status Conditions
+## Step 4 - Validate Status Conditions
 
 ```bash
 kubectl describe <kind> <name>

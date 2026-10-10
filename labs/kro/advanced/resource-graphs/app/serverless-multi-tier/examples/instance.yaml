@@ -3,11 +3,11 @@
 apiVersion: kro.run/v1alpha1
 kind: ServerlessMultiTier
 metadata:
-  name: app-020
+  name: kro-app-020
 spec:
-  name: app-020
+  name: kro-app-020
   s3Bucket: REPLACE_WITH_LAMBDA_BUCKET
   s3Key: function-python-users-posts.zip
   size: medium
   environment: dev
-  bucketSuffix: REPLACE_WITH_ACCOUNT_ID
+  bucketSuffix: "REPLACE_WITH_ACCOUNT_ID"

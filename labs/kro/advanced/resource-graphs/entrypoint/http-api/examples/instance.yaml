@@ -1,4 +1,4 @@
-# Standalone example — fronts an existing Lambda function
+# Standalone example - fronts an existing Lambda function
 apiVersion: kro.run/v1alpha1
 kind: WebAPI
 metadata:

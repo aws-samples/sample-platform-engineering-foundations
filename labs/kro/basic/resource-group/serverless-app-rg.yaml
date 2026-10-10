@@ -9,6 +9,8 @@ spec:
     spec:
       # --- Application settings ---
       appName: string
+      # S3 bucket names are global across all AWS accounts - append the account ID
+      bucketSuffix: string
       region: string | default="us-east-1"
       environment: string | default="dev"
 
@@ -20,7 +22,7 @@ spec:
       # --- RDS settings ---
       databaseName: string | default="appdb"
       dbInstanceClass: string | default="db.t3.medium"
-      dbEngineVersion: string | default="17.4"
+      dbEngineVersion: string | default="17"
       storageGB: integer | default=20
 
       # --- Lambda settings ---
@@ -30,9 +32,12 @@ spec:
       lambdaTimeoutSeconds: integer | default=30
 
     status:
-      rdsEndpoint: string
-      apiEndpoint: string
-      frontendBucket: string
+      # kro status fields must be CEL expressions that reference resources in
+      # the graph (not bare types) - a plain "rdsEndpoint: string" is rejected
+      # with "status fields without expressions are not supported".
+      rdsEndpoint: ${rdsInstance.status.endpoint.address}
+      apiEndpoint: ${apiGateway.status.apiEndpoint}
+      frontendBucket: ${frontendBucket.spec.name}
 
   resources:
     # ==========================================================
@@ -86,9 +91,6 @@ spec:
     # 3. RDS PostgreSQL Instance
     # ==========================================================
     - id: rdsInstance
-      dependsOn:
-        - rdsSubnetGroup
-        - rdsSG
       template:
         apiVersion: rds.services.k8s.aws/v1alpha1
         kind: DBInstance
@@ -103,7 +105,9 @@ spec:
           manageMasterUserPassword: true
           allocatedStorage: ${schema.spec.storageGB}
           dbName: ${schema.spec.databaseName}
-          dbSubnetGroupName: ${schema.spec.appName}-rds-subnet-group
+          # Reference the subnet group by CEL so kro orders this after it
+          # (kro derives ordering from references; there is no dependsOn field).
+          dbSubnetGroupName: ${rdsSubnetGroup.spec.name}
           vpcSecurityGroupIDs:
             - ${rdsSG.status.id}
           publiclyAccessible: false
@@ -139,7 +143,7 @@ spec:
               ]
             }
           policies:
-            - arn: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+            - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
           tags:
             - key: Environment
               value: ${schema.spec.environment}
@@ -169,10 +173,6 @@ spec:
     # 6. Lambda Function
     # ==========================================================
     - id: lambdaFunction
-      dependsOn:
-        - lambdaRole
-        - lambdaSG
-        - rdsInstance
       template:
         apiVersion: lambda.services.k8s.aws/v1alpha1
         kind: Function
@@ -180,7 +180,7 @@ spec:
           name: ${schema.spec.appName}-backend
         spec:
           name: ${schema.spec.appName}-backend
-          runtime: python3.12
+          runtime: python3.14
           handler: index.handler
           memorySize: ${schema.spec.lambdaMemoryMB}
           timeout: ${schema.spec.lambdaTimeoutSeconds}
@@ -223,9 +223,6 @@ spec:
     # 8. API Gateway Integration (Lambda proxy)
     # ==========================================================
     - id: apiIntegration
-      dependsOn:
-        - apiGateway
-        - lambdaFunction
       template:
         apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
         kind: Integration
@@ -242,8 +239,6 @@ spec:
     # 9. API Gateway Route (catch-all)
     # ==========================================================
     - id: apiRoute
-      dependsOn:
-        - apiIntegration
       template:
         apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
         kind: Route
@@ -258,8 +253,6 @@ spec:
     # 10. API Gateway Stage ($default, auto-deploy)
     # ==========================================================
     - id: apiStage
-      dependsOn:
-        - apiRoute
       template:
         apiVersion: apigatewayv2.services.k8s.aws/v1alpha1
         kind: Stage
@@ -280,14 +273,9 @@ spec:
         metadata:
           name: ${schema.spec.appName}-frontend
         spec:
-          name: ${schema.spec.appName}-frontend
+          name: ${schema.spec.appName}-frontend-${schema.spec.bucketSuffix}
           publicAccessBlock:
-            blockPublicAcls: true
+            blockPublicACLs: true
             blockPublicPolicy: true
-            ignorePublicAcls: true
+            ignorePublicACLs: true
             restrictPublicBuckets: true
-          tags:
-            - key: Environment
-              value: ${schema.spec.environment}
-            - key: ManagedBy
-              value: KRO-ACK

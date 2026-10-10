@@ -1,0 +1,66 @@
+# Crossplane Composition for XPartnerDrop. Never applied in this workshop.
+#
+# Two AWS resources that deploy and evolve together: the drop bucket and the
+# role the partner integration assumes to write into it. Physical names are
+# patched from the claim with string fmt transforms, which is what the
+# transformation turns into kro CEL string concatenation.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: partner-drop
+spec:
+  compositeTypeRef:
+    apiVersion: payments.example.org/v1alpha1
+    kind: XPartnerDrop
+  resources:
+    - name: dropBucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          deletionPolicy: Orphan
+          forProvider:
+            region: us-east-1
+            tags:
+              Project: payments
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.partnerName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: "payments-partner-drop-%s-417256"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.owningTeam
+          toFieldPath: spec.forProvider.tags.Team
+    - name: writerRole
+      base:
+        apiVersion: iam.aws.upbound.io/v1beta1
+        kind: Role
+        spec:
+          deletionPolicy: Orphan
+          forProvider:
+            assumeRolePolicy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": { "Service": "lambda.amazonaws.com" },
+                    "Action": "sts:AssumeRole"
+                  }
+                ]
+              }
+            tags:
+              Project: payments
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.partnerName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: "payments-partner-drop-%s-writer"

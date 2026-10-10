@@ -92,6 +92,29 @@ spec:
               memory: 2Gi
           # The GenAI plugin's own health endpoint serves as readiness:
           # if it answers, the plugin loaded and the agent was instantiated.
+          #
+          # WHY A startupProbe EXISTS HERE
+          #   The backend's first boot does real work before it binds :7007 -
+          #   config layers, plugin registration, the LangGraph agent, the
+          #   catalog read. Without a startupProbe, livenessProbe owns that
+          #   window, and its budget is initialDelay + failureThreshold*period
+          #   = 60 + 6*30 = 240s. A boot slower than that is SIGKILLed
+          #   (exit 137) and restarted, forever, and because the kill lands
+          #   before the logger has flushed anything useful the pod looks like
+          #   it is doing nothing at all. That exact shape was reported on
+          #   2026-09-12: 0/1 for ~10 minutes, node running as PID 1, zero
+          #   logs, port never bound.
+          #   A startupProbe suspends liveness until boot succeeds, so a slow
+          #   start is given 10 minutes (60*10s) instead of 4, and a genuinely
+          #   stuck start still fails - but as an honest CrashLoopBackOff after
+          #   a bounded wait, not as a silent restart loop.
+          startupProbe:
+            httpGet:
+              path: /api/aws-genai/health
+              port: 7007
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /api/aws-genai/health

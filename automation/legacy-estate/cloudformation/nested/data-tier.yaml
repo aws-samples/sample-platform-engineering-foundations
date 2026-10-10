@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Data tier for the payments platform. Nested inside payments-parent.yaml, which
+  is what makes it a composition unit: these resources deploy and evolve as a
+  group, parameterized by the inputs below. Those inputs become the RGD
+  schema.spec, and the outputs become schema.status.
+
+Parameters:
+  Project:
+    Type: String
+  Environment:
+    Type: String
+  VpcId:
+    Type: String
+
+Resources:
+  # A security group keeps its id in status, not spec, and that id does not
+  # exist until this stack is deployed. Expect it as a TODO(discovery) item.
+  AuditDbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${Project}-audit-db'
+      GroupDescription: Postgres access for the audit trail database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+          Description: Postgres from the application subnets
+
+  # dbInstanceIdentifier is in spec, so this resolves statically.
+  AuditDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${Project}-audit-trail'
+      Engine: postgres
+      EngineVersion: '17.10'
+      DBInstanceClass: db.r6g.large
+      AllocatedStorage: '200'
+      StorageEncrypted: true
+      MultiAZ: true
+      DBName: audit
+      MasterUsername: audit_admin
+      VPCSecurityGroups:
+        - !GetAtt AuditDbSecurityGroup.GroupId
+
+  AuditArchiveBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Project}-audit-archive-${AWS::AccountId}'
+      Tags:
+        - Key: Compliance
+          Value: retain-7y
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  DbEndpoint:
+    Description: Postgres endpoint of the audit trail database
+    Value: !GetAtt AuditDatabase.Endpoint.Address
+
+  ArchiveBucketName:
+    Description: Bucket holding archived audit records
+    Value: !Ref AuditArchiveBucket

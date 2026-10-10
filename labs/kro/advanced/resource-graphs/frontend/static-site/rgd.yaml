@@ -10,7 +10,7 @@ spec:
     apiVersion: v1alpha1
     kind: StaticSite
     spec:
-      # Bucket names are global — include a unique suffix (e.g. account ID)
+      # Bucket names are global - include a unique suffix (e.g. account ID)
       name: string
       environment: string | default="dev"
     status:
@@ -29,9 +29,9 @@ spec:
         spec:
           name: ${schema.spec.name}
           publicAccessBlock:
-            blockPublicAcls: true
+            blockPublicACLs: true
             blockPublicPolicy: true
-            ignorePublicAcls: true
+            ignorePublicACLs: true
             restrictPublicBuckets: true
           tagging:
             tagSet:

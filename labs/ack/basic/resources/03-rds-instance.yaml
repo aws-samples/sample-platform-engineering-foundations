@@ -7,7 +7,7 @@ spec:
   dbInstanceIdentifier: serverless-app-rds
   dbInstanceClass: db.t3.medium
   engine: postgres
-  engineVersion: "17.4"
+  engineVersion: "17"
   masterUsername: postgres
   manageMasterUserPassword: true
   allocatedStorage: 20

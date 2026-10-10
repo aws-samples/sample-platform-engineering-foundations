@@ -76,9 +76,9 @@ The `system` node pool is reserved for cluster-critical workloads. Application p
 `nodeClassRef` and the taints you set determine which workloads it accepts.
 
 Access is configured with `API_AND_CONFIG_MAP` and cluster creator admin permissions bootstrapped.
-Six `EKS::AccessEntry` resources grant the IDE instance and the platform roles access across
-clusters, which is why the browser IDE can talk to all three without you configuring kubeconfig by
-hand.
+The IDE stack creates one `EKS::AccessEntry` per cluster for its instance role, which is why the
+browser IDE can talk to all three without you configuring kubeconfig by hand. The main stack adds
+six more only with `Environment=prod`, for roles that exist solely in an AWS-hosted event account.
 
 ## The Backstage supporting stack
 
@@ -89,9 +89,10 @@ the main stack provisions it:
 |---|---|
 | ECR repository | Holds the Backstage container image |
 | CodeBuild project | Builds the image |
-| Application Load Balancer plus target group | Ingress for the portal |
+| Application Load Balancer plus target group | Ingress for the portal, in VPC 1 |
+| A second Application Load Balancer plus target group | Ingress for the CNOE stack, in VPC 2 next to cluster 2. A `TargetGroupBinding` cannot register a pod IP from another VPC, so the CNOE ingress needs a load balancer of its own |
 | CloudFront distribution | HTTPS entry point, so the portal has a working URL before the lab starts |
-| `EKS::PodIdentityAssociation` (2) | Identity for Crossplane and portal workloads |
+| `EKS::PodIdentityAssociation` (7) | Identity for the portal, External Secrets, the CNOE Crossplane, External Secrets and External DNS workloads, and the two optional Terraform controllers on cluster 2 |
 | SSM parameters (7) | Publishes VPC, subnet, and cluster identifiers for the IDE stacks to consume |
 
 The `BackstageTargetGroupArn` output is used with a `TargetGroupBinding`, which is how a pod running

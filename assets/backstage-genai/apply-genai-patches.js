@@ -62,10 +62,20 @@ patch('packages/backend/src/index.ts', 'GenAI backend plugins', src => {
   // The create-app scaffold ALREADY registers the kubernetes plugin in recent
   // versions. Registering it twice takes the whole backend down at boot:
   //   ExtensionPoint 'kubernetes.objects-provider' is already registered
-  // (measured in event fb1c47c8). Only add it if the scaffold does not have it.
+  // (measured on a real workshop event). Only add it if the scaffold does not have it.
   if (!src.includes('plugin-kubernetes-backend')) {
     lines.push("// Kubernetes plugin backend: feeds the Kubernetes tab on the entity pages.");
     lines.push("backend.add(import('@backstage/plugin-kubernetes-backend'));");
+  }
+  // Argo CD plugin backend (Roadie). It sits OUTSIDE the kubernetes `if`: the
+  // scaffold already registers kubernetes, so that block is skipped - which is
+  // exactly how this registration never made it into the bundle on the first
+  // attempt. The frontend alone opens the card with "Cannot get argo
+  // location(s) for service", even with the proxy answering 200: the backend is
+  // what resolves the instance through appLocatorMethods (measured on a real
+  // workshop event).
+  if (!src.includes('argo-cd-backend')) {
+    lines.push("backend.add(import('@roadiehq/backstage-plugin-argo-cd-backend'));");
   }
   lines.push('', anchor);
   const block = lines.join('\n');
@@ -94,7 +104,7 @@ function patchEntityPageK8s() {
   // taking away the Argo CD tab, which is exactly the one the scaffold does
   // NOT have.
   const hasK8s = before.includes('EntityKubernetesContent');
-  const hasArgo = before.includes('EntityArgoCDHistoryCard');
+  const hasArgo = before.includes('ArgocdDeploymentSummary');
   if (hasK8s && hasArgo) {
     console.log('[patch] already applied (no-op): Kubernetes and Argo CD tabs');
     return;
@@ -118,14 +128,27 @@ function patchEntityPageK8s() {
     '    </EntityLayout.Route>');
   if (!hasArgo) parts.push(
     '    <EntityLayout.Route path="/argocd" title="Argo CD">',
-    '      <EntityArgoCDHistoryCard />',
+    '      <Grid container spacing={3} alignItems="stretch">',
+    '        <Grid item sm={12}>',
+    '          <ArgocdDeploymentSummary />',
+    '        </Grid>',
+    '        <Grid item sm={12}>',
+    '          <ArgocdDeploymentLifecycle />',
+    '        </Grid>',
+    '      </Grid>',
     '    </EntityLayout.Route>');
   const tab = parts.concat(['', '  ']).join('\n');
   let out = before.slice(0, close) + tab + before.slice(close);
   // imports go in ONLY now that the usages exist - an orphan import is a build
   // error under Backstage's strict tsconfig (noUnusedLocals).
   if (!hasK8s) out = "import { EntityKubernetesContent } from '@backstage/plugin-kubernetes';\n" + out;
-  if (!hasArgo) out = "import { EntityArgoCDHistoryCard } from '@roadiehq/backstage-plugin-argo-cd';\n" + out;
+  if (!hasArgo) {
+    out = "import { ArgocdDeploymentSummary, ArgocdDeploymentLifecycle } from '@backstage-community/plugin-redhat-argocd';\n" + out;
+    if (!/import\s+Grid\s+from\s+['"]@material-ui\/core\/Grid['"]/.test(out) &&
+        !/\bGrid\b[^\n]*from\s+['"]@material-ui\/core['"]/.test(out)) {
+      out = "import Grid from '@material-ui/core/Grid';\n" + out;
+    }
+  }
   fs.writeFileSync(file, out, 'utf8');
   changed++;
   console.log(`[patch] applied: ${[!hasK8s && 'Kubernetes tab', !hasArgo && 'Argo CD tab'].filter(Boolean).join(' + ')} (${rel})`);
