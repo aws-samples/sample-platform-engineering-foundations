@@ -1,0 +1,24 @@
+image:
+  registry: harbor.local
+  repository: gitea/gitea
+  tag: 1.27.0
+  digest: sha256:caa57d932c7b78eb19b638dc38fd7c2f5512d4f90d8369c680a73bebf1b1de28
+strategy: {type: Recreate}
+persistence: {enabled: true, storageClass: ec2-instance-store-sc, size: 20Gi}
+service: {http: {type: ClusterIP}}
+gitea:
+  admin:
+    existingSecret: gitea-admin
+    passwordMode: keepUpdated
+    email: platform@platform.local
+  config:
+    server: {ROOT_URL: http://gitea-http.git-local.svc.cluster.local:3000/}
+    service: {DISABLE_REGISTRATION: true}
+    database: {DB_TYPE: sqlite3}
+    session: {PROVIDER: db}
+    queue: {TYPE: level}
+    cache: {ADAPTER: memory}
+postgresql-ha: {enabled: false}
+postgresql: {enabled: false}
+valkey-cluster: {enabled: false}
+valkey: {enabled: false}

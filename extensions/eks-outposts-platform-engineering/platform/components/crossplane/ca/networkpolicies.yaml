@@ -1,0 +1,78 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: crossplane-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: crossplane-system
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver
+  namespace: crossplane-system
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: "${KUBERNETES_SERVICE_IP_CIDR}"}
+        - ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aws-and-pod-identity
+  namespace: crossplane-system
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: pkg.crossplane.io/provider, operator: Exists}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: "169.254.170.23/32"}
+      ports:
+        - {protocol: TCP, port: 80}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-nodes
+  namespace: crossplane-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}
+      ports:
+        - {protocol: TCP}

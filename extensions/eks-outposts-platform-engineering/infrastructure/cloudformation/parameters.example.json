@@ -1,0 +1,26 @@
+{
+  "region": "<AWS_REGION>",
+  "network_stack": "platform-outposts-network",
+  "cluster_stack": "platform-outposts-cluster",
+  "nodes_stack": "platform-outposts-nodes",
+  "identity_stack": "platform-outposts-crossplane-identity",
+  "parameters": {
+    "OutpostArn": "<OUTPOST_ARN>",
+    "AvailabilityZone": "<OUTPOST_ANCHOR_AZ>",
+    "VpcCidr": "10.40.0.0/16",
+    "PublicSubnetCidr": "10.40.0.0/24",
+    "OutpostSubnetCidr": "10.40.1.0/24",
+    "ClusterName": "platform-outposts",
+    "KubernetesVersion": "<SUPPORTED_KUBERNETES_VERSION>",
+    "ClusterRoleArn": "<CLUSTER_ROLE_ARN>",
+    "ControlPlaneInstanceType": "<SUPPORTED_CONTROL_PLANE_INSTANCE_TYPE>",
+    "EtcdInstanceType": "<SUPPORTED_ETCD_INSTANCE_TYPE>",
+    "InstanceType": "<INSTANCE_STORE_NODE_TYPE_SUPPORTED_BY_THE_DRIVER>",
+    "NodeSecurityGroupIds": "<NODE_SECURITY_GROUP_ID>",
+    "LocalRegistryHost": "harbor.local",
+    "LocalRegistryIp": "172.20.0.20",
+    "LocalRegistryCaPemBase64": "<BASE64_PUBLIC_CA_CERTIFICATE>",
+    "Owner": "sample-owner",
+    "Project": "platform-outposts"
+  }
+}

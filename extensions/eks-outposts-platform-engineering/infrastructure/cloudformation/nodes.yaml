@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store sample
+
+
+Parameters:
+  ClusterName:
+    Type: String
+
+  ClusterEndpoint:
+    Type: String
+
+  ClusterCertificateAuthority:
+    Type: String
+    NoEcho: false
+
+  ClusterServiceCidr:
+    Type: String
+    Default: 172.20.0.0/16
+
+  OutpostSubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+  NodeSecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+
+  InstanceType:
+    Type: String
+
+  NodeAmiSsmParameter:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/eks/optimized-ami/1.33/amazon-linux-2023/x86_64/standard/recommended/image_id
+
+  DesiredSize:
+    Type: Number
+    Default: 2
+  MinSize:
+    Type: Number
+    Default: 2
+  MaxSize:
+    Type: Number
+    Default: 4
+
+  ProtectNewInstancesFromScaleIn:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  RootVolumeSize:
+    Type: Number
+    Default: 100
+
+  RootVolumeType:
+    Type: String
+    Default: gp2
+    AllowedValues: [gp2]
+
+  SshKeyName:
+    Type: String
+    Default: ''
+
+  LocalRegistryHost:
+    Type: String
+    Default: ''
+  LocalRegistryIp:
+    Type: String
+    Default: ''
+  LocalRegistryCaPemBase64:
+    Type: String
+    Default: ''
+  MirroredRegistryHost:
+    Type: String
+    Default: ''
+  PrivateMirroredRegistryHost:
+    Type: String
+    Default: ''
+  LocalRegistryMirrorPath:
+    Type: String
+    Default: /v2/ecr
+    AllowedPattern: '^/v2(/[a-z0-9._-]+)*$'
+
+  Owner:
+    Type: String
+    Default: sample-owner
+  Project:
+    Type: String
+    Default: platform-outposts
+
+Conditions:
+  HasSshKey: !Not [!Equals [!Ref SshKeyName, '']]
+  ProtectFromScaleIn: !Equals [!Ref ProtectNewInstancesFromScaleIn, 'true']
+  HasLocalRegistry: !Not [!Equals [!Ref LocalRegistryHost, '']]
+  HasLocalRegistryIp: !And [!Condition HasLocalRegistry, !Not [!Equals [!Ref LocalRegistryIp, '']]]
+  HasLocalRegistryCa: !And [!Condition HasLocalRegistry, !Not [!Equals [!Ref LocalRegistryCaPemBase64, '']]]
+  HasMirroredRegistry: !And [!Condition HasLocalRegistry, !Not [!Equals [!Ref MirroredRegistryHost, '']]]
+  HasPrivateMirroredRegistry: !And [!Condition HasLocalRegistry, !Not [!Equals [!Ref PrivateMirroredRegistryHost, '']]]
+
+Resources:
+  NodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-node-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+      Tags:
+        - { Key: Owner, Value: !Ref Owner }
+        - { Key: Project, Value: !Ref Project }
+
+  NodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${ClusterName}-node-profile'
+      Roles:
+        - !Ref NodeRole
+
+  NodeAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt NodeRole.Arn
+      Type: EC2_LINUX
+      Tags:
+        - { Key: Owner, Value: !Ref Owner }
+        - { Key: Project, Value: !Ref Project }
+
+  NodeLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${ClusterName}-node'
+      LaunchTemplateData:
+        ImageId: !Ref NodeAmiSsmParameter
+        InstanceType: !Ref InstanceType
+        KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref 'AWS::NoValue']
+        IamInstanceProfile:
+          Name: !Ref NodeInstanceProfile
+        SecurityGroupIds: !Ref NodeSecurityGroupIds
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref RootVolumeSize
+              VolumeType: !Ref RootVolumeType
+              Encrypted: true
+              DeleteOnTermination: true
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
+        Monitoring:
+          Enabled: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - { Key: Name, Value: !Sub '${ClusterName}-node' }
+              - Key: !Sub 'kubernetes.io/cluster/${ClusterName}'
+                Value: owned
+              - { Key: Owner, Value: !Ref Owner }
+              - { Key: Project, Value: !Ref Project }
+          - ResourceType: volume
+            Tags:
+              - { Key: Owner, Value: !Ref Owner }
+              - { Key: Project, Value: !Ref Project }
+        UserData:
+          Fn::Base64: !Join
+            - ''
+            - - !Sub |
+                MIME-Version: 1.0
+                Content-Type: multipart/mixed; boundary="//"
+
+                --//
+                Content-Type: application/node.eks.aws
+
+                ---
+                apiVersion: node.eks.aws/v1alpha1
+                kind: NodeConfig
+                spec:
+                  cluster:
+                    name: ${ClusterName}
+                    apiServerEndpoint: ${ClusterEndpoint}
+                    certificateAuthority: ${ClusterCertificateAuthority}
+                    cidr: ${ClusterServiceCidr}
+              - !If
+                - HasLocalRegistry
+                - !Sub |
+                  --//
+                  Content-Type: text/cloud-config; charset="us-ascii"
+                  MIME-Version: 1.0
+                  Content-Transfer-Encoding: 7bit
+
+                  write_files:
+                    - path: /etc/containerd/certs.d/${LocalRegistryHost}/hosts.toml
+                      owner: "root:root"
+                      permissions: "0644"
+                      content: |
+                        server = "https://${LocalRegistryHost}"
+
+                        [host."https://${LocalRegistryHost}"]
+                          capabilities = ["pull", "resolve"]
+                - ''
+              - !If
+                - HasLocalRegistryCa
+                - !Sub |2
+                          ca = "/etc/containerd/certs.d/${LocalRegistryHost}/ca.crt"
+                    - path: /etc/containerd/certs.d/${LocalRegistryHost}/ca.crt
+                      owner: "root:root"
+                      permissions: "0644"
+                      encoding: b64
+                      content: ${LocalRegistryCaPemBase64}
+                - ''
+              - !If
+                - HasMirroredRegistry
+                - !Sub |2
+                    - path: /etc/containerd/certs.d/${MirroredRegistryHost}/hosts.toml
+                      owner: "root:root"
+                      permissions: "0644"
+                      content: |
+                        server = "https://${MirroredRegistryHost}"
+
+                        [host."https://${LocalRegistryHost}${LocalRegistryMirrorPath}"]
+                          capabilities = ["pull", "resolve"]
+                          override_path = true
+                - ''
+              - !If
+                - HasMirroredRegistry
+                - !If
+                  - HasLocalRegistryCa
+                  - !Sub |2
+                            ca = "/etc/containerd/certs.d/${LocalRegistryHost}/ca.crt"
+                  - ''
+                - ''
+              - !If
+                - HasPrivateMirroredRegistry
+                - !Sub |2
+                    - path: /etc/containerd/certs.d/${PrivateMirroredRegistryHost}/hosts.toml
+                      owner: "root:root"
+                      permissions: "0644"
+                      content: |
+                        server = "https://${PrivateMirroredRegistryHost}"
+
+                        [host."https://${LocalRegistryHost}${LocalRegistryMirrorPath}"]
+                          capabilities = ["pull", "resolve"]
+                          override_path = true
+                - ''
+              - !If
+                - HasPrivateMirroredRegistry
+                - !If
+                  - HasLocalRegistryCa
+                  - !Sub |2
+                            ca = "/etc/containerd/certs.d/${LocalRegistryHost}/ca.crt"
+                  - ''
+                - ''
+              - !If
+                - HasLocalRegistryIp
+                - !Sub |
+                  bootcmd:
+                    - [ sh, -c, "grep -q ' ${LocalRegistryHost}$' /etc/hosts || echo '${LocalRegistryIp} ${LocalRegistryHost}' >> /etc/hosts" ]
+                - ''
+              - "--//--\n"
+
+  NodeAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: NodeAccessEntry
+    Properties:
+      AutoScalingGroupName: !Sub '${ClusterName}-node'
+      VPCZoneIdentifier:
+        - !Ref OutpostSubnetId
+      DesiredCapacity: !Ref DesiredSize
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NodeLaunchTemplate
+        Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+      NewInstancesProtectedFromScaleIn: !If [ProtectFromScaleIn, true, false]
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-node'
+          PropagateAtLaunch: true
+        - Key: !Sub 'kubernetes.io/cluster/${ClusterName}'
+          Value: owned
+          PropagateAtLaunch: true
+        - Key: Owner
+          Value: !Ref Owner
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: !Ref Project
+          PropagateAtLaunch: true
+
+Outputs:
+  NodeRoleArn:
+    Value: !GetAtt NodeRole.Arn
+  NodeInstanceProfileName:
+    Value: !Ref NodeInstanceProfile
+  LaunchTemplateId:
+    Value: !Ref NodeLaunchTemplate
+  LaunchTemplateLatestVersion:
+    Value: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+  AutoScalingGroupName:
+    Value: !Ref NodeAutoScalingGroup
+  NodeAmiId:
+    Value: !Ref NodeAmiSsmParameter

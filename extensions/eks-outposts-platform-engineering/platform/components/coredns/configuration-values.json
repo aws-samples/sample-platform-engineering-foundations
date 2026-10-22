@@ -1,0 +1,3 @@
+{
+  "corefile": ".:53 {\n    errors\n    health {\n        lameduck 5s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n    }\n    k8s_external platform.lab\n    prometheus :9153\n    forward . /etc/resolv.conf\n    cache 30 {\n        serve_stale 1h immediate\n    }\n    loop\n    reload\n    loadbalance\n}\n"
+}

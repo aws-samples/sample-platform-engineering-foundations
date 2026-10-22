@@ -1,0 +1,9 @@
+global:
+  domain: argocd.platform.local
+configs:
+  params: {server.insecure: true}
+server: {service: {type: ClusterIP}}
+controller: {replicas: 1}
+repoServer: {replicas: 1}
+applicationSet: {replicas: 1}
+redis-ha: {enabled: false}

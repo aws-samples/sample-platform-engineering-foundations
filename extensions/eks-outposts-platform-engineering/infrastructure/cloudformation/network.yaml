@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Network for Amazon EKS local clusters on AWS Outposts configured with EC2 instance store
+Parameters:
+  OutpostArn: {Type: String}
+  AvailabilityZone: {Type: AWS::EC2::AvailabilityZone::Name}
+  VpcCidr: {Type: String, Default: 10.40.0.0/16}
+  PublicSubnetCidr: {Type: String, Default: 10.40.0.0/24}
+  OutpostSubnetCidr: {Type: String, Default: 10.40.1.0/24}
+  Name: {Type: String, Default: platform-outposts}
+  Owner: {Type: String, Default: sample-owner}
+  Project: {Type: String, Default: platform-outposts}
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: !Ref Name}, {Key: Owner, Value: !Ref Owner}, {Key: Project, Value: !Ref Project}]
+  InternetGateway: {Type: AWS::EC2::InternetGateway}
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref Vpc, InternetGatewayId: !Ref InternetGateway}
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, AvailabilityZone: !Ref AvailabilityZone, CidrBlock: !Ref PublicSubnetCidr, MapPublicIpOnLaunch: true}
+  OutpostSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, AvailabilityZone: !Ref AvailabilityZone, OutpostArn: !Ref OutpostArn, CidrBlock: !Ref OutpostSubnetCidr, MapPublicIpOnLaunch: false}
+  NatAddress:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties: {Domain: vpc}
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties: {AllocationId: !GetAtt NatAddress.AllocationId, SubnetId: !Ref PublicSubnet}
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties: {RouteTableId: !Ref PublicRouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway}
+  PublicAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref PublicRouteTable, SubnetId: !Ref PublicSubnet}
+  OutpostRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  OutpostRoute:
+    Type: AWS::EC2::Route
+    Properties: {RouteTableId: !Ref OutpostRouteTable, DestinationCidrBlock: 0.0.0.0/0, NatGatewayId: !Ref NatGateway}
+  OutpostAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref OutpostRouteTable, SubnetId: !Ref OutpostSubnet}
+Outputs:
+  VpcId: {Value: !Ref Vpc}
+  PublicSubnetId: {Value: !Ref PublicSubnet}
+  OutpostSubnetId: {Value: !Ref OutpostSubnet}
+  Region: {Value: !Ref AWS::Region}
+  AccountId: {Value: !Ref AWS::AccountId}
+  OutpostArn: {Value: !Ref OutpostArn}
+  BastionCidr: {Value: !Ref PublicSubnetCidr}
+  NodeSubnetCidr: {Value: !Ref OutpostSubnetCidr}

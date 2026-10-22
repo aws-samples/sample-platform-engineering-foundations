@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ec2-instance-store-sc
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: lis.csi.aws.com
+parameters:
+  throttling: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
+reclaimPolicy: Delete

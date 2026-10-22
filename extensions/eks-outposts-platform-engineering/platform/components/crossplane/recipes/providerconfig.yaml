@@ -1,0 +1,9 @@
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: platform-pod-identity
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  credentials:
+    source: PodIdentity

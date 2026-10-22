@@ -1,0 +1,149 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: victorialogs
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: victorialogs
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: victorialogs
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingest-and-query
+  namespace: victorialogs
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: victoria-logs-single, app.kubernetes.io/instance: victorialogs}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: fluent-bit}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: fluent-bit}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: grafana}
+      ports:
+        - {protocol: TCP, port: 9428}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kubelet-probes
+  namespace: victorialogs
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: victoria-logs-single, app.kubernetes.io/instance: victorialogs}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: "${OUTPOST_SUBNET_CIDR}"
+      ports:
+        - {protocol: TCP, port: 9428}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-victorialogs
+  namespace: fluent-bit
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: fluent-bit}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: victorialogs}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: victoria-logs-single, app.kubernetes.io/instance: victorialogs}
+      ports:
+        - {protocol: TCP, port: 9428}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana-victorialogs-and-plugin
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: grafana}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: victorialogs}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: victoria-logs-single, app.kubernetes.io/instance: victorialogs}
+      ports:
+        - {protocol: TCP, port: 9428}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: registry-local}
+          podSelector:
+            matchLabels: {app: harbor, release: harbor, component: nginx}
+      ports:
+        - {protocol: TCP, port: 8443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana-plugin-pull
+  namespace: registry-local
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app: harbor, release: harbor, component: nginx}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: grafana}
+      ports:
+        - {protocol: TCP, port: 8443}

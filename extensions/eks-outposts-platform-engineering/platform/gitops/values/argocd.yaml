@@ -1,0 +1,17 @@
+global:
+  domain: argocd.platform.local
+  image: {repository: harbor.local/argoproj/argocd}
+configs:
+  params: {server.insecure: true}
+controller: {replicas: 1, image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+server: {service: {type: ClusterIP}, image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+repoServer: {replicas: 1, image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+applicationSet: {replicas: 1, image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+notifications: {image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+redisSecretInit: {image: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}}
+dex:
+  image: {repository: harbor.local/dexidp/dex, tag: "v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462"}
+  initImage: {tag: "v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa"}
+redis:
+  image: {repository: harbor.local/library/redis, tag: "8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763"}
+redis-ha: {enabled: false}

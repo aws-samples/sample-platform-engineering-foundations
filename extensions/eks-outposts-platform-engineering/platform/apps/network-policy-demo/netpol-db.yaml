@@ -1,0 +1,17 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db
+  namespace: demo-netpol
+  labels: {app.kubernetes.io/part-of: demo-netpol}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: db}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: backend}
+      ports:
+        - {protocol: TCP, port: 5432}

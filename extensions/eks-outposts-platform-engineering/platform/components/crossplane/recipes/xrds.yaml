@@ -1,0 +1,77 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: platformbuckets.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: platform.sample.lab
+  names:
+    kind: PlatformBucket
+    plural: platformbuckets
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [bucketName, team]
+              properties:
+                bucketName:
+                  type: string
+                  description: Globally unique S3 bucket name. The platform role only allows sample-plat-*.
+                  pattern: "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+                team:
+                  type: string
+                  description: Owning team, written to the `team` tag.
+                  pattern: "^[a-z0-9-]{2,40}$"
+            status:
+              type: object
+              properties:
+                arn: {type: string}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: platformtables.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: platform.sample.lab
+  names:
+    kind: PlatformTable
+    plural: platformtables
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [tableName, team]
+              properties:
+                tableName:
+                  type: string
+                  description: DynamoDB table name. The platform role only allows sample-plat-*.
+                  pattern: "^[a-zA-Z0-9_.-]{3,255}$"
+                team:
+                  type: string
+                  pattern: "^[a-z0-9-]{2,40}$"
+                hashKey:
+                  type: string
+                  description: Partition key name (type S). On-demand billing, PITR and SSE are fixed.
+                  default: pk
+                  pattern: "^[a-zA-Z0-9_.-]{1,255}$"
+            status:
+              type: object
+              properties:
+                arn: {type: string}

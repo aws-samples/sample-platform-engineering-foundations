@@ -1,0 +1,55 @@
+---
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-s3
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-s3
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-dynamodb
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-dynamodb
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-family-aws
+spec:
+  package: harbor.local/crossplane-contrib/provider-family-aws:v2.9.0@sha256:4b426b75d6c2b5cbc3270b4c2423c81cfd0ce7e7a7f5f02d2af305ba76944505
+  skipDependencyResolution: true
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-s3
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-s3:v2.9.0@sha256:6440c4f796517174438ac55a693e244936c4d24c41e38cbad98365e7ff6b893c
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-s3
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-dynamodb
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-dynamodb:v2.9.0@sha256:ae03bce48f25bd2980a46d2d94239b2f8ae0441bf2d27be9613f7e156489ba6b
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-dynamodb
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+spec:
+  package: harbor.local/crossplane-contrib/function-patch-and-transform:v0.11.1@sha256:ac5d07e28facaa8a9782d0ae112ae7f149b451742a2d25f375f73449c8581b54
+  skipDependencyResolution: true

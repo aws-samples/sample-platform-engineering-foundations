@@ -1,0 +1,6 @@
+36d8eeb41b4df1aeff18c9af7709110a2fac2194b491d37957822b3359cd5e9a  harbor/harbor:1.19.2
+5881ef9c59400bee2d5547e77c4cd0efb925143c2f5d93fb4f38446db76b0167  gitea/gitea:12.7.0
+970ced346a0ddc3e475a7ff780e9b9c2fdebc07d9a367d2edb6ef4f49832c24a  argo/argo-cd:10.9.2
+aa7bd2d4b5326322c9d73852b22adcc031bbbe848b8bcaf8afaea9800b6294a5  vm/victoria-logs-single:0.13.10
+c895af6e8b2fe9011aa3a53532055091c25fc3976e4c7d8062cf96a258c1466b  vm/victoria-metrics-k8s-stack:0.93.0
+eeace77cdc7e727a8400cb7a229e290d4d28dd730b440a1b06fb6df4569cd33c  crossplane/crossplane:2.4.3

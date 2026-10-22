@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: platform-networkpolicies
+spec:
+  podSelector:
+    matchLabels:
+      k8s-app: kube-dns
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - from:
+        - ipBlock:
+            cidr: "${OUTPOST_SUBNET_CIDR}"
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8181}
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: "${KUBERNETES_SERVICE_IP_CIDR}"
+      ports:
+        - {protocol: TCP, port: 443}

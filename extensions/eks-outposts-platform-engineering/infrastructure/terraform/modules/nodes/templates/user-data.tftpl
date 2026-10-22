@@ -1,0 +1,61 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="//"
+
+--//
+Content-Type: application/node.eks.aws
+
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: ${cluster_name}
+    apiServerEndpoint: ${cluster_endpoint}
+    certificateAuthority: ${cluster_certificate_authority_data}
+    cidr: ${cluster_service_cidr}
+%{ if length(kubelet_flags) > 0 ~}
+  kubelet:
+    flags:
+%{ for flag in kubelet_flags ~}
+      - "${flag}"
+%{ endfor ~}
+%{ endif ~}
+%{ if local_registry != null ~}
+--//
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+write_files:
+  - path: ${registry_certs_dir}/hosts.toml
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      ${indent(6, registry_hosts_toml)}
+%{ if local_registry.ca_pem != null ~}
+  - path: ${registry_certs_dir}/ca.crt
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      ${indent(6, trimspace(local_registry.ca_pem))}
+%{ endif ~}
+%{ if mirror_hosts_toml != null ~}
+  - path: ${mirror_certs_dir}/hosts.toml
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      ${indent(6, mirror_hosts_toml)}
+%{ endif ~}
+%{ for dir, toml in extra_mirrors ~}
+  - path: ${dir}/hosts.toml
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      ${indent(6, toml)}
+%{ endfor ~}
+%{ if local_registry.ip != null ~}
+bootcmd:
+  - [ sh, -c, "grep -q ' ${local_registry.host}$' /etc/hosts || echo '${local_registry.ip} ${local_registry.host}' >> /etc/hosts" ]
+%{ endif ~}
+%{ endif ~}
+--//--

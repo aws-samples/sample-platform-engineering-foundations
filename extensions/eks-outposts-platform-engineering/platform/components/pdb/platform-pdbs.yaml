@@ -1,0 +1,72 @@
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: harbor-database
+  namespace: registry-local
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {release: harbor, app: harbor, component: database}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: harbor-redis
+  namespace: registry-local
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {release: harbor, app: harbor, component: redis}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: harbor-registry
+  namespace: registry-local
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {release: harbor, app: harbor, component: registry}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: harbor-jobservice
+  namespace: registry-local
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {release: harbor, app: harbor, component: jobservice}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gitea
+  namespace: git-local
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {app.kubernetes.io/name: gitea, app.kubernetes.io/instance: gitea}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: argocd-application-controller
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-pdb}
+spec:
+  maxUnavailable: 0
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {app.kubernetes.io/name: argocd-application-controller, app.kubernetes.io/instance: argocd}

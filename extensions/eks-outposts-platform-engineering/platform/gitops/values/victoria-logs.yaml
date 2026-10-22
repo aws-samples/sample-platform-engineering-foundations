@@ -1,0 +1,19 @@
+fullnameOverride: victorialogs
+server:
+  image:
+    registry: harbor.local
+    repository: victoriametrics/victoria-logs
+    tag: "v1.53.0@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d"
+    pullPolicy: IfNotPresent
+  mode: deployment
+  deployment: {spec: {strategy: {type: Recreate}}}
+  retentionPeriod: 14d
+  retentionDiskSpaceUsage: 24GiB
+  persistentVolume:
+    enabled: true
+    accessModes: [ReadWriteOnce]
+    storageClassName: ec2-instance-store-sc
+    size: 30Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}

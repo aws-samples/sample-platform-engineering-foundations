@@ -1,0 +1,20 @@
+.:53 {
+    errors
+    health {
+        lameduck 5s
+    }
+    ready
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+        pods insecure
+        fallthrough in-addr.arpa ip6.arpa
+    }
+    k8s_external platform.lab
+    prometheus :9153
+    forward . /etc/resolv.conf
+    cache 30 {
+        serve_stale 1h immediate
+    }
+    loop
+    reload
+    loadbalance
+}

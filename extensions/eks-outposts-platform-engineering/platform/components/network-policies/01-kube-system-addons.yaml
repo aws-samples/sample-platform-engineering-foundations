@@ -1,0 +1,78 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ebs-csi-controller
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels: {app: ebs-csi-controller}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from: [{ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 9808}]
+  egress:
+  - to: [{podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  - to: [{ipBlock: {cidr: "${KUBERNETES_SERVICE_IP_CIDR}"}}, {ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 443}]
+  - to: [{ipBlock: {cidr: 0.0.0.0/0, except: ["169.254.169.254/32"]}}]
+    ports: [{protocol: TCP, port: 443}]
+  - to: [{ipBlock: {cidr: "${EBS_CSI_CONTROLLER_CREDENTIAL_CIDR}"}}]
+    ports: [{protocol: TCP, port: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ebs-csi-node
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels: {app: ebs-csi-node}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from: [{ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 9808}, {protocol: TCP, port: 9809}]
+  egress:
+  - to: [{podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  - to: [{ipBlock: {cidr: "${KUBERNETES_SERVICE_IP_CIDR}"}}, {ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 443}]
+  - to: [{ipBlock: {cidr: 169.254.169.254/32}}]
+    ports: [{protocol: TCP, port: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-server
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: metrics-server}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from: [{ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 10251}]
+  egress:
+  - to: [{podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  - to: [{ipBlock: {cidr: "${KUBERNETES_SERVICE_IP_CIDR}"}}, {ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 443}]
+  - to: [{ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 10250}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: snapshot-controller
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels: {app: snapshot-controller}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+  - to: [{podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  - to: [{ipBlock: {cidr: "${KUBERNETES_SERVICE_IP_CIDR}"}}, {ipBlock: {cidr: "${OUTPOST_SUBNET_CIDR}"}}]
+    ports: [{protocol: TCP, port: 443}]

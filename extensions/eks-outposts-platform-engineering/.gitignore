@@ -1,0 +1,6 @@
+platform/.runtime/
+platform-contract.json
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars

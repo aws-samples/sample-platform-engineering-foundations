@@ -1,0 +1,28 @@
+image:
+  repository: harbor.local/crossplane/crossplane
+  tag: "v2.4.3@sha256:1c66261d805a73cade46e2ac94b665c73aebd4a00844de5fcae4bcadaa2be638"
+  pullPolicy: IfNotPresent
+
+registryCaBundleConfig:
+  name: harbor-ca
+  key: ca.crt
+
+hostNetwork: true
+dnsPolicy: ClusterFirstWithHostNet
+metrics:
+  enabled: true
+  port: "18680"
+readiness:
+  port: "18681"
+webhooks:
+  enabled: false
+  port: "18643"
+
+provider:
+  packages: []
+function:
+  packages: []
+
+resourcesCrossplane:
+  limits: {cpu: 500m, memory: 512Mi}
+  requests: {cpu: 50m, memory: 256Mi}

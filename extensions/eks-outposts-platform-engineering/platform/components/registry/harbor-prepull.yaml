@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: harbor-image-prepull, namespace: registry-local}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: harbor-image-prepull}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: harbor-image-prepull}}
+    spec:
+      initContainers:
+        - {name: core, image: harbor.local/goharbor/harbor-core:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: database, image: harbor.local/goharbor/harbor-db:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: jobservice, image: harbor.local/goharbor/harbor-jobservice:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: portal, image: harbor.local/goharbor/harbor-portal:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: registryctl, image: harbor.local/goharbor/harbor-registryctl:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: nginx, image: harbor.local/goharbor/nginx-photon:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: registry, image: harbor.local/goharbor/registry-photon:v2.15.2, command: [/bin/sh, -c, "true"]}
+        - {name: redis, image: harbor.local/goharbor/valkey-photon:v2.15.2, command: [/bin/sh, -c, "true"]}
+      containers:
+        - {name: hold, image: harbor.local/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e, command: [sh, -c, "sleep 3600"]}

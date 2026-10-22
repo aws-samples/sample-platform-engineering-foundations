@@ -1,0 +1,30 @@
+expose:
+  type: clusterIP
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls
+  clusterIP:
+    name: harbor
+    staticClusterIP: "172.20.0.20"
+externalURL: https://harbor.local
+existingSecretAdminPassword: harbor-admin
+existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry: {storageClass: ec2-instance-store-sc, size: 40Gi}
+    database: {storageClass: ec2-instance-store-sc, size: 10Gi}
+    redis: {storageClass: ec2-instance-store-sc, size: 5Gi}
+trivy: {enabled: false}
+updateStrategy: {type: Recreate}
+core: {image: {repository: harbor.local/goharbor/harbor-core, tag: v2.15.2}}
+jobservice: {image: {repository: harbor.local/goharbor/harbor-jobservice, tag: v2.15.2}}
+portal: {image: {repository: harbor.local/goharbor/harbor-portal, tag: v2.15.2}}
+registry:
+  registry: {image: {repository: harbor.local/goharbor/registry-photon, tag: v2.15.2}}
+  controller: {image: {repository: harbor.local/goharbor/harbor-registryctl, tag: v2.15.2}}
+nginx: {image: {repository: harbor.local/goharbor/nginx-photon, tag: v2.15.2}}
+database: {type: internal, internal: {image: {repository: harbor.local/goharbor/harbor-db, tag: v2.15.2}}}
+redis: {type: internal, internal: {image: {repository: harbor.local/goharbor/valkey-photon, tag: v2.15.2}}}

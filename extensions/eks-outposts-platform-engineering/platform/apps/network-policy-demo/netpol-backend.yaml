@@ -1,0 +1,17 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend
+  namespace: demo-netpol
+  labels: {app.kubernetes.io/part-of: demo-netpol}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: backend}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: frontend}
+      ports:
+        - {protocol: TCP, port: 8080}

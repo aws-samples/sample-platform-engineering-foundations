@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store sample
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: platform-outposts-cfn
+  NamePrefix:
+    Type: String
+    Default: sample-plat-
+    AllowedPattern: "^[a-z0-9-]+-$"
+  Namespace:
+    Type: String
+    Default: crossplane-system
+  S3ServiceAccount:
+    Type: String
+    Default: provider-aws-s3
+  DynamoDbServiceAccount:
+    Type: String
+    Default: provider-aws-dynamodb
+
+Resources:
+  ProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-crossplane-provider-aws"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: ["sts:AssumeRole", "sts:TagSession"]
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+      Policies:
+        - PolicyName: sample-plat-scope
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BucketsInPrefix
+                Effect: Allow
+                Action: ["s3:*"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${NamePrefix}*/*"
+              - Sid: TablesInPrefix
+                Effect: Allow
+                Action: ["dynamodb:*"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NamePrefix}*/*"
+              - Sid: AccountLevelReads
+                Effect: Allow
+                Action: ["dynamodb:ListTables", "dynamodb:DescribeLimits", "dynamodb:DescribeEndpoints", "s3:ListAllMyBuckets"]
+                Resource: "*"
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  S3Association:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref S3ServiceAccount
+      RoleArn: !GetAtt ProviderRole.Arn
+
+  DynamoDbAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref DynamoDbServiceAccount
+      RoleArn: !GetAtt ProviderRole.Arn
+
+Outputs:
+  ProviderRoleArn:
+    Value: !GetAtt ProviderRole.Arn

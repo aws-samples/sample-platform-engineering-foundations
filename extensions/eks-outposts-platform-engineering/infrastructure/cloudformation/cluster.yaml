@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store
+Parameters:
+  ClusterName: {Type: String, Default: platform-outposts}
+  KubernetesVersion: {Type: String}
+  ClusterRoleArn: {Type: String}
+  OutpostArn: {Type: String}
+  SubnetIds: {Type: CommaDelimitedList}
+  ControlPlaneInstanceType: {Type: String}
+  EtcdInstanceType: {Type: String}
+  SpreadLevel: {Type: String, Default: none, AllowedValues: [none, host, rack]}
+  Owner: {Type: String, Default: sample-owner}
+  Project: {Type: String, Default: platform-outposts}
+Conditions:
+  UseSpread: !Not [!Equals [!Ref SpreadLevel, none]]
+Resources:
+  LocalCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      Version: !Ref KubernetesVersion
+      RoleArn: !Ref ClusterRoleArn
+      ResourcesVpcConfig: {SubnetIds: !Ref SubnetIds, EndpointPrivateAccess: true, EndpointPublicAccess: false}
+      AccessConfig: {AuthenticationMode: API_AND_CONFIG_MAP, BootstrapClusterCreatorAdminPermissions: true}
+      OutpostConfig:
+        OutpostArns: [!Ref OutpostArn]
+        ControlPlaneInstanceType: !Ref ControlPlaneInstanceType
+        EtcdInstanceType: !Ref EtcdInstanceType
+        ControlPlanePlacement: !If [UseSpread, {SpreadLevel: !Ref SpreadLevel}, !Ref AWS::NoValue]
+        EtcdPlacement: !If [UseSpread, {SpreadLevel: !Ref SpreadLevel}, !Ref AWS::NoValue]
+      Tags: [{Key: Owner, Value: !Ref Owner}, {Key: Project, Value: !Ref Project}]
+Outputs:
+  ClusterName: {Value: !Ref LocalCluster}
+  ClusterArn: {Value: !GetAtt LocalCluster.Arn}
+  ClusterEndpoint: {Value: !GetAtt LocalCluster.Endpoint}
+  LocalClusterVersion: {Value: !Ref KubernetesVersion}
+  EcrRegistry: {Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}'}

@@ -1,0 +1,32 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: namespace-egress
+  namespace: demo-netpol
+  labels: {app.kubernetes.io/part-of: demo-netpol}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+  namespace: demo-netpol
+  labels: {app.kubernetes.io/part-of: demo-netpol}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: frontend}
+  policyTypes: [Ingress]

@@ -1,0 +1,116 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KUBERNETES_SERVICE_IP_CIDR}"
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-gitea
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: git-local}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: gitea, app.kubernetes.io/instance: gitea}
+      ports:
+        - {protocol: TCP, port: 3000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-repo-server-upstream
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: argocd-repo-server, app.kubernetes.io/instance: argocd}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-nodes
+  namespace: argocd
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/instance: argocd}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: "${OUTPOST_SUBNET_CIDR}"
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8084}
+        - {protocol: TCP, port: 8082}

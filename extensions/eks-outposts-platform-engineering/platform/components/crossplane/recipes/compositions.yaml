@@ -1,0 +1,138 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: platformbucket-s3
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sample.lab/v1alpha1
+    kind: PlatformBucket
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: bucket-name
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.bucketName
+                toFieldPath: spec.forProvider.bucket
+        resources:
+          - name: bucket
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  region: us-west-2
+                  forceDestroy: false
+                  tags: {managed-by: crossplane, platform: sample-plat}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.bucketName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.arn
+          - name: public-access-block
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  region: us-west-2
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+            patches:
+              - type: PatchSet
+                patchSetName: bucket-name
+          - name: encryption
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  region: us-west-2
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: AES256
+            patches:
+              - type: PatchSet
+                patchSetName: bucket-name
+          - name: versioning
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  region: us-west-2
+                  versioningConfiguration:
+                    status: Enabled
+            patches:
+              - type: PatchSet
+                patchSetName: bucket-name
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: platformtable-dynamodb
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sample.lab/v1alpha1
+    kind: PlatformTable
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: table
+            base:
+              apiVersion: dynamodb.aws.m.upbound.io/v1beta1
+              kind: Table
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  region: us-west-2
+                  billingMode: PAY_PER_REQUEST
+                  pointInTimeRecovery: {enabled: true}
+                  serverSideEncryption: {enabled: true}
+                  attribute:
+                    - {name: pk, type: S}
+                  hashKey: pk
+                  tags: {managed-by: crossplane, platform: sample-plat}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.tableName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.hashKey
+                toFieldPath: spec.forProvider.hashKey
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.hashKey
+                toFieldPath: spec.forProvider.attribute[0].name
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.arn

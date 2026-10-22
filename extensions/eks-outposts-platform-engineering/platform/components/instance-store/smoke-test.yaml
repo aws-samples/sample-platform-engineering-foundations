@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lis-csi-test
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-nvme
+  namespace: lis-csi-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ec2-instance-store-sc
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: local-nvme-smoke
+  namespace: lis-csi-test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: writer
+      image: harbor.local/library/busybox:1.37.0
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          echo "$(date -u +%FT%TZ)" | tee /data/sentinel
+          sync
+          sha256sum /data/sentinel
+          sleep 3600
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: local-nvme

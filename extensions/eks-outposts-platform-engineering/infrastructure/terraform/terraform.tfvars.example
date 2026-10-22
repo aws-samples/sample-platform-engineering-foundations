@@ -1,0 +1,28 @@
+aws_region            = "<AWS_REGION>"
+expected_account_id   = "<AWS_ACCOUNT_ID>"
+name                  = "platform-outposts"
+cluster_name          = "platform-outposts"
+kubernetes_version    = "<SUPPORTED_KUBERNETES_VERSION>"
+outpost_arn           = "<OUTPOST_ARN>"
+availability_zone     = "<OUTPOST_ANCHOR_AZ>"
+vpc_cidr              = "10.40.0.0/16"
+public_subnet_cidr    = "10.40.0.0/24"
+outpost_subnet_cidr   = "10.40.1.0/24"
+control_plane_instance_type = "<SUPPORTED_CONTROL_PLANE_INSTANCE_TYPE>"
+etcd_instance_type          = "<SUPPORTED_ETCD_INSTANCE_TYPE>"
+node_instance_type           = "<INSTANCE_STORE_NODE_TYPE_SUPPORTED_BY_THE_DRIVER>"
+create_cluster_role          = true
+create_node_role             = true
+node_attach_ebs_csi_policy   = false
+enable_ebs_csi_driver        = false
+enable_pod_identity_agent    = true
+enable_crossplane_identity   = true
+local_registry = {
+  host         = "harbor.local"
+  ip           = "172.20.0.20"
+  ca_cert_file = "<PATH_TO_PUBLIC_CA_CERTIFICATE>"
+}
+tags = {
+  Project = "platform-outposts"
+  Owner   = "sample-owner"
+}

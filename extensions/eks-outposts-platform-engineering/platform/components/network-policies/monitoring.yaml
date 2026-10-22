@@ -1,0 +1,109 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KUBERNETES_SERVICE_IP_CIDR}"
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-scrape-egress
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: vmagent}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${OUTPOST_SUBNET_CIDR}"
+      ports:
+        - {protocol: TCP, port: 10250}
+        - {protocol: TCP, port: 9100}
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 9153}
+        - {protocol: TCP, port: 9797}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-subnet
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: platform-networkpolicies}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: "${OUTPOST_SUBNET_CIDR}"
+      ports:
+        - {protocol: TCP, port: 9443}
+        - {protocol: TCP, port: 8428}
+        - {protocol: TCP, port: 8429}
+        - {protocol: TCP, port: 8435}
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8081}
+        - {protocol: TCP, port: 9093}
+    - from:
+        - ipBlock:
+            cidr: "${BASTION_SUBNET_CIDR}"
+      ports:
+        - {protocol: TCP, port: 3000}

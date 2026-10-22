@@ -1,0 +1,20 @@
+expose:
+  type: clusterIP
+  tls:
+    enabled: true
+    certSource: secret
+    secret: {secretName: harbor-tls}
+  clusterIP: {name: harbor, staticClusterIP: "172.20.0.20"}
+externalURL: https://harbor.local
+existingSecretAdminPassword: harbor-admin
+existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry: {storageClass: ec2-instance-store-sc, size: 40Gi}
+    database: {storageClass: ec2-instance-store-sc, size: 10Gi}
+    redis: {storageClass: ec2-instance-store-sc, size: 5Gi}
+database: {type: internal}
+redis: {type: internal}
+trivy: {enabled: false}
+updateStrategy: {type: Recreate}

@@ -1,0 +1,59 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata: {name: platform, namespace: argocd}
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy: {preserveResourcesOnDeletion: true, applicationsSync: create-update}
+  generators:
+    - matrix:
+        generators:
+          - clusters: {selector: {matchLabels: {enable_platform: "true"}}}
+          - list:
+              elements:
+                - {app: gitea, kind: helm, namespace: git-local, wave: "-2", chart: charts/gitea/12.7.0/gitea, values: gitops/values/gitea.yaml}
+                - {app: victoria-metrics, kind: helm, namespace: monitoring, wave: "0", chart: charts/victoria-metrics-k8s-stack/0.93.0/victoria-metrics-k8s-stack, values: gitops/values/victoria-metrics.yaml}
+                - {app: victorialogs, kind: helm, namespace: victorialogs, wave: "1", chart: charts/victoria-logs-single/0.13.10/victoria-logs-single, values: gitops/values/victoria-logs.yaml}
+                - {app: node-local-dns, kind: directory, namespace: kube-system, wave: "1", path: components/node-local-dns}
+                - {app: platform-pdbs, kind: directory, namespace: default, wave: "1", path: components/pdb}
+                - {app: platform-network-policies, kind: directory, namespace: default, wave: "2", path: components/network-policies}
+                - {app: network-policy-demo, kind: directory, namespace: default, wave: "3", path: apps/network-policy-demo}
+    - matrix:
+        generators:
+          - clusters: {selector: {matchLabels: {enable_platform: "true", enable_crossplane: "true"}}}
+          - list:
+              elements:
+                - {app: crossplane, kind: helm, namespace: crossplane-system, wave: "1", chart: charts/crossplane/2.4.3/crossplane, values: components/crossplane/values.yaml}
+                - {app: crossplane-ca, kind: directory, namespace: crossplane-system, wave: "1", path: components/crossplane/ca}
+    - matrix:
+        generators:
+          - clusters: {selector: {matchLabels: {enable_platform: "true", enable_crossplane_packages: "true"}}}
+          - list: {elements: [{app: crossplane-packages, kind: directory, namespace: crossplane-system, wave: "2", path: components/crossplane/packages}]}
+    - matrix:
+        generators:
+          - clusters: {selector: {matchLabels: {enable_platform: "true", enable_crossplane_recipes: "true"}}}
+          - list: {elements: [{app: crossplane-recipes, kind: directory, namespace: crossplane-system, wave: "3", path: components/crossplane/recipes}]}
+  template:
+    metadata:
+      name: '{{ .app }}'
+      namespace: argocd
+      annotations: {argocd.argoproj.io/sync-wave: '{{ .wave }}'}
+    spec:
+      project: default
+      destination: {server: '{{ .server }}', namespace: '{{ .namespace }}'}
+  templatePatch: |
+    spec:
+    {{- if eq .kind "directory" }}
+      source: {repoURL: '{{ .metadata.annotations.gitea_repo }}', targetRevision: main, path: '{{ .path }}'}
+    {{- else }}
+      sources:
+        - repoURL: '{{ .metadata.annotations.gitea_repo }}'
+          targetRevision: main
+          path: '{{ .chart }}'
+          helm: {releaseName: '{{ .app }}', valueFiles: ['$values/{{ .values }}']}
+        - {repoURL: '{{ .metadata.annotations.gitea_repo }}', targetRevision: main, ref: values}
+    {{- end }}
+      syncPolicy:
+        automated: {prune: false, selfHeal: true}
+        syncOptions: [CreateNamespace=true, ServerSideApply=true, SkipDryRunOnMissingResource=true]
+        retry: {limit: 10, backoff: {duration: 30s, maxDuration: 5m}}

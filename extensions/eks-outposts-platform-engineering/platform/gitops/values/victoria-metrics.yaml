@@ -1,0 +1,48 @@
+vmsingle:
+  spec:
+    retentionPeriod: 30d
+    image: {repository: harbor.local/victoriametrics/victoria-metrics, tag: "v1.152.0@sha256:86ca5fdb6d87d56ba047b044039019ba2bd9042b36e35f6ea34e437b6c825cef"}
+    storage:
+      storageClassName: ec2-instance-store-sc
+      resources: {requests: {storage: 30Gi}}
+grafana:
+  enabled: true
+  image: {registry: harbor.local, repository: grafana/grafana, sha: 7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b}
+  initChownData:
+    image: {registry: harbor.local, repository: library/busybox, tag: 1.38.0, sha: fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e}
+  persistence: {enabled: true, storageClassName: ec2-instance-store-sc, size: 5Gi}
+  deploymentStrategy: {type: Recreate}
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  sidecar:
+    image: {registry: harbor.local, repository: kiwigrid/k8s-sidecar, tag: 2.8.1, sha: abb55b2165c60e8f97e473862c7a3123df6f67d44f592949577c29b8fb2df9d6}
+  grafana.ini:
+    plugins: {preinstall_disabled: true, public_key_retrieval_disabled: true, plugin_admin_enabled: false}
+    analytics: {reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false}
+    news: {news_feed_enabled: false}
+alertmanager:
+  enabled: true
+  spec:
+    image: {repository: harbor.local/prometheus/alertmanager, tag: "v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d"}
+    storage:
+      volumeClaimTemplate:
+        spec: {storageClassName: ec2-instance-store-sc, resources: {requests: {storage: 2Gi}}}
+vmagent:
+  spec:
+    image: {repository: harbor.local/victoriametrics/vmagent, tag: "v1.152.0@sha256:21d51831acfed657c1d4a805353c278f3669b061cb3a2cd46c0d4f1a4402cb1b"}
+vmalert:
+  spec:
+    image: {repository: harbor.local/victoriametrics/vmalert, tag: "v1.152.0@sha256:ba00566373eb8c72d70cbee123e27ee75292dc0239830f36218c72712ba396b2"}
+defaultDashboards: {enabled: false}
+syncJob: {enabled: false}
+victoria-metrics-operator:
+  crds: {cleanup: {enabled: false}}
+  image: {registry: harbor.local, repository: victoriametrics/operator, tag: "v0.74.1@sha256:7310c4a80b94f530c5f0b1fcf6d6eaf933f39cc5704e983900d9cfd6b31f9dc1"}
+  configReloader:
+    image: {registry: harbor.local, repository: victoriametrics/operator, tag: "config-reloader-v0.74.1@sha256:0909fff9dde819f9a5847779855ebc030e4f00d61751352945a309e6ce80310c"}
+kube-state-metrics:
+  image: {registry: harbor.local, repository: kube-state-metrics/kube-state-metrics, tag: v2.19.1, sha: sha256:85108987d044b18a098126732f98602df408888c0f7d456241f5abefb9744bc1}
+prometheus-node-exporter:
+  image: {registry: harbor.local, repository: prometheus/node-exporter, tag: v1.11.1, digest: sha256:0f422f62c15f154af8d8572b23d623aebfb10cec73a5c654d18f911f3f9df241}
