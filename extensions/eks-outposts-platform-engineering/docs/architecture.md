@@ -22,6 +22,17 @@ The contract contains the cluster name, Region, account identifier, Outpost ARN,
 - The driver uses the worker node instance profile, so it has credentials from node boot, before any per-pod identity agent runs. Both fronts attach `AmazonEBSCSIDriverPolicy` to the node role. The controller NetworkPolicy allows port 80 only to the instance metadata endpoint.
 - Harbor, Gitea, VictoriaMetrics, Grafana, Alertmanager, and VictoriaLogs name `platform-ebs-gp2` explicitly. The class is not the cluster default.
 
+### Storage decision for disconnected operations
+
+The cluster control-plane backing store and the workload persistent-storage path are separate decisions:
+
+- Configuring EKS local-cluster control plane and etcd instances with EC2 instance store keeps Kubernetes cluster operations local during a Service Link interruption. It does not provide persistent volumes to workloads.
+- The implemented workload path is Amazon EBS. It is durable on the Outpost, but volume mutations and snapshots require Regional APIs.
+- A platform that must mutate stateful workloads during a prolonged disconnect needs a locally reachable alternative storage mechanism. The primary candidate is an enterprise array with a vendor-supported Kubernetes CSI driver. Replicated software-defined storage is an alternative with higher node, disk, network, and operational overhead.
+- The EC2 Local Instance Store CSI Driver is an ephemeral option, not a durable replacement for the platform claims. It remains outside the automatic deployment and has not been validated on an EKS local cluster.
+
+The complete recommendation, prerequisites, validation status, and sources are in [Storage strategy](../platform/components/storage/README.md).
+
 ## Local dependency chain
 
 1. The EBS CSI driver and `platform-ebs-gp2` provide persistent volumes on the Outpost.

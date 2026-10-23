@@ -59,8 +59,22 @@ The storage architecture comes from a source implementation that ran on an Outpo
 > [!WARNING]
 > During a network disconnect, [pods backed by Amazon EBS cannot be created, updated, or scaled](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-network-disconnects.html), and EBS snapshots cannot be created or deleted, because those operations call regional APIs.
 
+### Recommended storage strategy for prolonged disconnection
+
 > [!IMPORTANT]
-> Outposts configured with EC2 instance store use the updated local-cluster architecture. Because the entire Kubernetes cluster runs locally, applications remain available and cluster operations can continue during cloud disconnections when local authentication, DNS, images, observability, and spare capacity are prepared. This does not make regional APIs available, so workloads that depend on Amazon EBS, IRSA, or EKS Pod Identity still need the dependency planning described above. See the official [instance-store local-cluster overview](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-instance-store-local-cluster-overview.html) and [network-disconnection preparation guide](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-instance-store-network-disconnects.html).
+> If the platform must create, update, reschedule, or scale stateful workloads during a prolonged Service Link disconnection, do not use Amazon EBS as its only persistent storage path.
+>
+> 1. **Enterprise storage with a vendor-supported Kubernetes CSI driver (primary candidate):** use an on-premises array reachable through the local network, such as NetApp ONTAP with [Trident](https://docs.netapp.com/us-en/trident/trident-get-started/intro.html), when enterprise support, dynamic provisioning, snapshots, replication, and recovery are requirements.
+> 2. **Replicated software-defined storage (open-source candidate):** evaluate [Longhorn](https://longhorn.io/docs/1.10.1/what-is-longhorn/) or [OpenEBS](https://openebs.io/docs/main/) when no enterprise array is available. These options consume local disks and network capacity and require explicit failure-domain, rebuild, backup, and node-loss testing.
+> 3. **Amazon EBS CSI driver (complementary):** keep `platform-ebs-gp2` for workloads that do not require storage mutations during a disconnect. Pre-provision the required claims while connected.
+
+> [!WARNING]
+> Alternative storage is not enabled by this extension. Before production use, validate local network reachability, storage-array and initiator configuration, VLAN and routing requirements, operating-system and CSI support, spare capacity, vendor support, node loss, replica rebuild, backup and restore, and a real disconnected test. AWS documents the [alternative-storage requirement for disconnected stateful mutations](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-network-disconnects.html) and the [Outposts integration with third-party block storage](https://docs.aws.amazon.com/outposts/latest/userguide/outpost-third-party-block-storage.html).
+
+> [!CAUTION]
+> EC2 instance store for the EKS local-cluster control plane is a separate design choice from persistent storage for application workloads. It keeps the Kubernetes control plane local, but it does not create a durable workload StorageClass or make Regional APIs available. The EC2 Local Instance Store CSI Driver exposes ephemeral node-local disks: a PersistentVolume object does not make the physical data durable, and the source implementation has not validated that driver on an EKS local cluster. See the official [instance-store local-cluster overview](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-instance-store-local-cluster-overview.html) and [network-disconnection preparation guide](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-instance-store-network-disconnects.html).
+
+The detailed decision matrix, prerequisites, and validation status are in [Storage strategy](platform/components/storage/README.md).
 
 ## Cleanup
 

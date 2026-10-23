@@ -27,6 +27,23 @@ The static run includes `python3 scripts/check-iac-parity.py`. It executes the C
 
 Repeat the runtime checks with the regional link unavailable. Do not call an add-on `ACTIVE` or an application `Healthy` proof of behavior. Exercise the actual read, write, DNS, policy, metric, and log paths. Do not create, resize, or move EBS-backed pods during the disconnect; that is a documented limit of local clusters, not a test result.
 
+## Alternative storage acceptance
+
+Do not describe an alternative storage path as validated until every criterion passes on the target rack during a real disconnected test.
+
+| Criterion | Command or measured action | Required proof |
+|---|---|---|
+| Correct provisioner | `kubectl get storageclass "$ALT_SC" -o jsonpath='{.provisioner}{"\n"}'` | The expected vendor or software-defined CSI provisioner, never `ebs.csi.aws.com` |
+| Dynamic provisioning while disconnected | `kubectl apply -f <alternative-storage-smoke-test.yaml>` followed by `kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/<claim> -n <namespace> --timeout=120s` | A new claim binds while the Service Link is disconnected |
+| Data continuity | `kubectl exec -n <namespace> <pod> -- sha256sum <mounted-sentinel>` before and after pod replacement | The checksum is identical |
+| Rescheduling | `kubectl delete pod -n <namespace> <pod>` followed by `kubectl wait --for=condition=Ready pod -l <selector> -n <namespace> --timeout=300s` | The replacement runs on an eligible node and reads the sentinel |
+| Node-loss boundary | Isolate one storage-bearing worker according to the approved test plan, then run `kubectl get pod,pvc,pv -n <namespace> -o wide` | The documented quorum, replica, failover, and recovery behavior occurs within the accepted time |
+| Replica rebuild | Use the storage system's native status command after the node returns | All replicas become healthy without losing the sentinel |
+| Backup and restore | Use the storage system's documented local backup and restore commands | A restored claim has the original checksum without a Regional dependency |
+| Negative control | Repeat dynamic provisioning with `ALT_SC=platform-ebs-gp2` while disconnected | The EBS-backed create or reschedule operation fails, proving the test is exercising the Regional dependency |
+
+Record timestamps, nodes, StorageClass, provisioner, volume IDs, checksums, failover time, rebuild time, backup target, and the Outpost `ConnectedStatus`. A Bound PVC alone is not acceptance.
+
 ## Boundary
 
 This package is publish-ready source, not evidence of a completed Outpost hardware test of this assembled package. The README records what the source implementation measured on hardware. Record the target Outpost, node type, add-on versions, timestamps, and paired-control results outside Git after the test.
