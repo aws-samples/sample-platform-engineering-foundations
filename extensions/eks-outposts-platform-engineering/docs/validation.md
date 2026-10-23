@@ -2,6 +2,8 @@
 
 Run `bash scripts/validate.sh` before deployment and `bash scripts/validate.sh --runtime` after bootstrap. For a release build, set `PRIVATE_DENYLIST_FILE` to a non-repository file containing `word:<value>` or `substring:<value>` rules. The validator fails on malformed rules and never copies the file into the package.
 
+The static run includes `python3 scripts/check-iac-parity.py`. It executes the CloudFormation and Terraform contract emitters against one synthetic environment and requires the same 12 keys and values. It also verifies the two entry points, the shared bootstrap handoff, VPC CNI ownership, and the Crossplane Pod Identity trust, permissions, namespace, service accounts, and resource-name prefix. Six mutation controls must all be detected.
+
 ## Connected preparation
 
 - Both IaC fronts validate and emit the same contract keys.

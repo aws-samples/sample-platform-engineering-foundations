@@ -75,6 +75,7 @@ import sys
 from pathlib import Path
 for name in sys.argv[1:]: compile(Path(name).read_text(), name, 'exec')
 PY
+python3 "$ROOT/scripts/check-iac-parity.py" "$ROOT"
 python3 - "$ROOT" <<'PY'
 import json, shutil, subprocess, sys, tempfile
 from pathlib import Path

@@ -28,7 +28,11 @@ Choose exactly one front for an environment. Both converge on the same architect
 }
 ```
 
-No platform implementation is duplicated between the fronts. Neither CloudFormation nor Terraform declares the VPC CNI add-on. The shared bootstrap is the single owner of strict NetworkPolicy enforcement and policy event logging. The shared path is:
+No platform implementation is duplicated between the fronts. Neither CloudFormation nor Terraform declares the VPC CNI add-on. The shared bootstrap is the single owner of strict NetworkPolicy enforcement and policy event logging.
+
+`python3 scripts/check-iac-parity.py` exercises both contract emitters with the same synthetic environment, compares all 12 normalized keys and values, checks both entry points, and compares the Crossplane Pod Identity trust and permission boundaries. Six mutation controls prove that the gate detects contract, identity, permission, VPC CNI ownership, and entry-point drift. `bash scripts/validate.sh` runs this gate automatically.
+
+The shared path is:
 
 1. `bash scripts/fetch-charts.sh` downloads pinned third-party charts while connected and verifies every package against `scripts/charts.lock`. Charts and returned license files stay in the ignored runtime directory and are not committed to the public repository.
 2. The selected IaC front creates the network, cluster, self-managed nodes, core add-ons, and the Crossplane identity boundary.
