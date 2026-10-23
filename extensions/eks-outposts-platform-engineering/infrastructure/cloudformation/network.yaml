@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Network for Amazon EKS local clusters on AWS Outposts configured with EC2 instance store
+Description: Platform Engineering demo on Amazon EKS local clusters on AWS Outposts, network
 Parameters:
   OutpostArn: {Type: String}
   AvailabilityZone: {Type: AWS::EC2::AvailabilityZone::Name}

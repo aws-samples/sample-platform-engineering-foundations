@@ -16,7 +16,7 @@ def main():
     n,c=outputs(a.network_stack),outputs(a.cluster_stack)
     cluster=json.loads(run("aws","eks","describe-cluster","--region",a.region,"--name",c["ClusterName"],"--output","json"))["cluster"]
     data={"cluster_name":c["ClusterName"],"aws_region":n["Region"],"account_id":n["AccountId"],"outpost_arn":n["OutpostArn"],"kubernetes_version":c["LocalClusterVersion"],"registry_service_ip":a.registry_service_ip,"node_subnet_cidr":n["NodeSubnetCidr"],"bastion_subnet_cidr":n["BastionCidr"],"kubernetes_service_ip_cidr":service_ip(cluster["kubernetesNetworkConfig"]["serviceIpv4Cidr"]),"cluster_dns_service_ip":str(ipaddress.ip_network(cluster["kubernetesNetworkConfig"]["serviceIpv4Cidr"]).network_address + 10)}
-  data["ebs_csi_controller_credential_cidr"]="169.254.170.23/32"
+  data["ebs_csi_controller_credential_cidr"]="169.254.169.254/32"
   data["gitea_repo"]="http://gitea-http.git-local.svc.cluster.local:3000/platform-admin/platform-demo.git"
   print(json.dumps(data, indent=2))
 if __name__=="__main__": main()

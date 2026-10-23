@@ -1,7 +1,6 @@
 locals {
   kube_proxy_version         = lookup(var.addon_versions, "kube-proxy", null)
   coredns_version            = lookup(var.addon_versions, "coredns", null)
-  ebs_csi_version            = lookup(var.addon_versions, "aws-ebs-csi-driver", null)
   pod_identity_agent_version = lookup(var.addon_versions, "eks-pod-identity-agent", null)
 }
 
@@ -28,25 +27,6 @@ resource "aws_eks_addon" "coredns" {
   addon_version = local.coredns_version
 
   configuration_values = lookup(var.core_addon_configuration_values, "coredns", null)
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "PRESERVE"
-
-  timeouts {
-    create = var.create_timeout
-  }
-
-  tags = var.tags
-}
-
-resource "aws_eks_addon" "ebs_csi_driver" {
-  count = var.enable_ebs_csi_driver ? 1 : 0
-
-  cluster_name  = var.cluster_name
-  addon_name    = "aws-ebs-csi-driver"
-  addon_version = local.ebs_csi_version
-
-  configuration_values = lookup(var.core_addon_configuration_values, "aws-ebs-csi-driver", null)
 
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "PRESERVE"

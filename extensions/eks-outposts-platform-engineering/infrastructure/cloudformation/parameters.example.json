@@ -15,7 +15,7 @@
     "ClusterRoleArn": "<CLUSTER_ROLE_ARN>",
     "ControlPlaneInstanceType": "<SUPPORTED_CONTROL_PLANE_INSTANCE_TYPE>",
     "EtcdInstanceType": "<SUPPORTED_ETCD_INSTANCE_TYPE>",
-    "InstanceType": "<INSTANCE_STORE_NODE_TYPE_SUPPORTED_BY_THE_DRIVER>",
+    "InstanceType": "<SUPPORTED_WORKER_INSTANCE_TYPE>",
     "NodeSecurityGroupIds": "<NODE_SECURITY_GROUP_ID>",
     "LocalRegistryHost": "harbor.local",
     "LocalRegistryIp": "172.20.0.20",

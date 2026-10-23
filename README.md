@@ -501,9 +501,9 @@ Full procedure, including step 5 and the cases that commonly get stuck, in
 [CNOE](https://cnoe.io/) ·
 [AWS Transform custom](https://docs.aws.amazon.com/transform/latest/userguide/custom-get-started.html)
 
-## Related Demo: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store
+## Related Demo: Platform Engineering demo on Amazon EKS local clusters on AWS Outposts
 
-A separate extension demonstrates [Amazon EKS local clusters on AWS Outposts configured with EC2 instance store](extensions/eks-outposts-platform-engineering/README.md) with equivalent CloudFormation and Terraform fronts feeding one shared GitOps platform. It does not change the workshop or self-paced paths above.
+A separate extension provides a [Platform Engineering demo on Amazon EKS local clusters on AWS Outposts](extensions/eks-outposts-platform-engineering/README.md), with Amazon EBS gp2 storage and equivalent CloudFormation and Terraform fronts feeding one shared GitOps platform. It does not change the workshop or self-paced paths above.
 
 ## Contributing
 

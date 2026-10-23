@@ -3,14 +3,14 @@ vmsingle:
     retentionPeriod: 30d
     image: {repository: harbor.local/victoriametrics/victoria-metrics, tag: "v1.152.0@sha256:86ca5fdb6d87d56ba047b044039019ba2bd9042b36e35f6ea34e437b6c825cef"}
     storage:
-      storageClassName: ec2-instance-store-sc
+      storageClassName: platform-ebs-gp2
       resources: {requests: {storage: 30Gi}}
 grafana:
   enabled: true
   image: {registry: harbor.local, repository: grafana/grafana, sha: 7cb8c64c4d57a57e734073f3cc94620adb24a0acb929bd80ba9f14017e3a975b}
   initChownData:
     image: {registry: harbor.local, repository: library/busybox, tag: 1.38.0, sha: fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e}
-  persistence: {enabled: true, storageClassName: ec2-instance-store-sc, size: 5Gi}
+  persistence: {enabled: true, storageClassName: platform-ebs-gp2, size: 5Gi}
   deploymentStrategy: {type: Recreate}
   admin:
     existingSecret: grafana-admin
@@ -28,7 +28,7 @@ alertmanager:
     image: {repository: harbor.local/prometheus/alertmanager, tag: "v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d"}
     storage:
       volumeClaimTemplate:
-        spec: {storageClassName: ec2-instance-store-sc, resources: {requests: {storage: 2Gi}}}
+        spec: {storageClassName: platform-ebs-gp2, resources: {requests: {storage: 2Gi}}}
 vmagent:
   spec:
     image: {repository: harbor.local/victoriametrics/vmagent, tag: "v1.152.0@sha256:21d51831acfed657c1d4a805353c278f3669b061cb3a2cd46c0d4f1a4402cb1b"}

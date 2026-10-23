@@ -12,7 +12,7 @@ server:
   persistentVolume:
     enabled: true
     accessModes: [ReadWriteOnce]
-    storageClassName: ec2-instance-store-sc
+    storageClassName: platform-ebs-gp2
     size: 30Gi
   resources:
     requests: {cpu: 100m, memory: 256Mi}

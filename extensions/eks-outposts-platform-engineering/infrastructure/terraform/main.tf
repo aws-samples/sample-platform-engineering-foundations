@@ -100,8 +100,6 @@ module "addons" {
     var.coredns_configuration_values_file == null ? {} : { coredns = chomp(file(var.coredns_configuration_values_file)) }
   )
 
-  enable_ebs_csi_driver = var.enable_ebs_csi_driver
-
   enable_pod_identity_agent = var.enable_pod_identity_agent
 
   tags = var.tags

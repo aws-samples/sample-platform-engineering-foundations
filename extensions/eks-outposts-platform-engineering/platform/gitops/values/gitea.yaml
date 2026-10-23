@@ -4,7 +4,7 @@ image:
   tag: 1.27.0
   digest: sha256:caa57d932c7b78eb19b638dc38fd7c2f5512d4f90d8369c680a73bebf1b1de28
 strategy: {type: Recreate}
-persistence: {enabled: true, storageClass: ec2-instance-store-sc, size: 20Gi}
+persistence: {enabled: true, storageClass: platform-ebs-gp2, size: 20Gi}
 service: {http: {type: ClusterIP}}
 gitea:
   admin:

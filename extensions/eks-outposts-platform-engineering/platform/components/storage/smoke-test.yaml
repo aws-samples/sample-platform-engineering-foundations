@@ -1,26 +1,26 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: lis-csi-test
+  name: ebs-csi-test
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: local-nvme
-  namespace: lis-csi-test
+  name: ebs-gp2
+  namespace: ebs-csi-test
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: ec2-instance-store-sc
+  storageClassName: platform-ebs-gp2
   resources:
     requests:
-      storage: 10Gi
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: local-nvme-smoke
-  namespace: lis-csi-test
+  name: ebs-gp2-smoke
+  namespace: ebs-csi-test
 spec:
   restartPolicy: Never
   containers:
@@ -41,4 +41,4 @@ spec:
   volumes:
     - name: data
       persistentVolumeClaim:
-        claimName: local-nvme
+        claimName: ebs-gp2

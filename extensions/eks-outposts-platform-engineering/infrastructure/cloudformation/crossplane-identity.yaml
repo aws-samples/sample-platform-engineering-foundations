@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store sample
+Description: Platform Engineering demo on Amazon EKS local clusters on AWS Outposts, Crossplane Pod Identity
 
 Parameters:
   ClusterName:

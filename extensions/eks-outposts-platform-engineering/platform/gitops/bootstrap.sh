@@ -10,7 +10,7 @@ CONTRACT=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 : "${HARBOR_TLS_CERT_FILE:?set HARBOR_TLS_CERT_FILE}"
 : "${HARBOR_TLS_KEY_FILE:?set HARBOR_TLS_KEY_FILE}"
 : "${HARBOR_CA_FILE:?set HARBOR_CA_FILE}"
-: "${INSTANCE_STORE_CSI_VERSION:?set a pinned instance-store CSI add-on version}"
+: "${EBS_CSI_ADDON_VERSION:?set a pinned aws-ebs-csi-driver add-on version}"
 : "${POD_IDENTITY_AGENT_VERSION:?set a pinned Pod Identity agent add-on version}"
 : "${VPC_CNI_ADDON_VERSION:?set a pinned vpc-cni add-on version}"
 : "${COREDNS_ADDON_VERSION:?set a pinned coredns add-on version}"
@@ -31,9 +31,9 @@ kubectl -n crossplane-system create configmap harbor-ca --from-file=ca.crt="$HAR
 mksecret git-local gitea-admin --from-literal=username=platform-admin --from-literal=password="$GITEA_ADMIN_PASSWORD"
 mksecret monitoring grafana-admin --from-literal=admin-user=admin --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD"
 CHARTS="$ROOT/platform/.runtime/charts"
-ensure_addon aws-ec2-local-instance-store-csi-driver "$INSTANCE_STORE_CSI_VERSION"
+ensure_addon aws-ebs-csi-driver "$EBS_CSI_ADDON_VERSION"
 ensure_addon eks-pod-identity-agent "$POD_IDENTITY_AGENT_VERSION"
-kubectl apply -f "$ROOT/platform/components/instance-store/storageclass.yaml"
+kubectl apply -f "$ROOT/platform/components/storage/storageclass.yaml"
 helm upgrade --install harbor "$CHARTS/harbor/1.19.2/harbor" -n registry-local --create-namespace -f "$ROOT/platform/gitops/values/harbor-bootstrap.yaml" --set expose.clusterIP.staticClusterIP="$REGISTRY_IP" --wait
 helm upgrade --install gitea "$CHARTS/gitea/12.7.0/gitea" -n git-local --create-namespace -f "$ROOT/platform/gitops/values/gitea.yaml" --set image.registry=docker.gitea.com --set image.repository=gitea --set image.tag=1.27.0 --wait
 helm upgrade --install argocd "$CHARTS/argo-cd/10.9.2/argo-cd" -n argocd --create-namespace -f "$ROOT/platform/gitops/values/argocd-bootstrap.yaml" --wait

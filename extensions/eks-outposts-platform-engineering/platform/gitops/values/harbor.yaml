@@ -14,9 +14,10 @@ existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
 persistence:
   enabled: true
   persistentVolumeClaim:
-    registry: {storageClass: ec2-instance-store-sc, size: 40Gi}
-    database: {storageClass: ec2-instance-store-sc, size: 10Gi}
-    redis: {storageClass: ec2-instance-store-sc, size: 5Gi}
+    registry: {storageClass: platform-ebs-gp2, size: 40Gi}
+    database: {storageClass: platform-ebs-gp2, size: 10Gi}
+    redis: {storageClass: platform-ebs-gp2, size: 5Gi}
+    jobservice: {jobLog: {storageClass: platform-ebs-gp2, size: 1Gi}}
 trivy: {enabled: false}
 updateStrategy: {type: Recreate}
 core: {image: {repository: harbor.local/goharbor/harbor-core, tag: v2.15.2}}

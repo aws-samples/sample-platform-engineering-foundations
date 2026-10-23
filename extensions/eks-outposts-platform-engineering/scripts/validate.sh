@@ -80,7 +80,7 @@ python3 - "$ROOT" <<'PY'
 import json, shutil, subprocess, sys, tempfile
 from pathlib import Path
 root=Path(sys.argv[1])
-contract={"cluster_name":"platform-outposts","aws_region":"us-west-2","account_id":"1"*12,"outpost_arn":"arn:aws:outposts:us-west-2:"+"1"*12+":outpost/op-"+"a"*17,"kubernetes_version":"1.35","registry_service_ip":"172.20.0.20","node_subnet_cidr":"10.40.1.0/24","bastion_subnet_cidr":"10.40.0.0/24","kubernetes_service_ip_cidr":"172.20.0.1/32","cluster_dns_service_ip":"172.20.0.10","ebs_csi_controller_credential_cidr":"169.254.170.23/32"}
+contract={"cluster_name":"platform-outposts","aws_region":"us-west-2","account_id":"1"*12,"outpost_arn":"arn:aws:outposts:us-west-2:"+"1"*12+":outpost/op-"+"a"*17,"kubernetes_version":"1.35","registry_service_ip":"172.20.0.20","node_subnet_cidr":"10.40.1.0/24","bastion_subnet_cidr":"10.40.0.0/24","kubernetes_service_ip_cidr":"172.20.0.1/32","cluster_dns_service_ip":"172.20.0.10","ebs_csi_controller_credential_cidr":"169.254.169.254/32"}
 with tempfile.TemporaryDirectory() as tmp:
   target=Path(tmp); (target/"components").mkdir(); (target/"apps").mkdir()
   shutil.copytree(root/"platform/components/network-policies",target/"components/network-policies")
@@ -109,14 +109,46 @@ for path in Path(sys.argv[1]).rglob('*'):
     list(yaml.load_all(path.read_text(), Loader=Loader))
 print('PASS yaml-parse')
 PY
-for script in "$ROOT"/scripts/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh "$ROOT"/platform/components/instance-store/*.sh; do bash -n "$script"; done
-if command -v shellcheck >/dev/null; then shellcheck "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh "$ROOT"/platform/components/instance-store/*.sh; fi
+for script in "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh; do bash -n "$script"; done
+if command -v shellcheck >/dev/null; then shellcheck "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh; fi
 if command -v kubeconform >/dev/null; then
   manifests=()
   while IFS= read -r -d '' candidate; do
     grep -q '^kind:' "$candidate" && manifests+=("$candidate")
   done < <(find "$ROOT/platform" -type f -name '*.yaml' -not -path '*/values/*' -not -path '*/.runtime/*' -print0)
   kubeconform -strict -summary -ignore-missing-schemas "${manifests[@]}"
+fi
+if command -v helm >/dev/null && [[ -d "$ROOT/platform/.runtime/charts" ]]; then
+  python3 - "$ROOT" <<'PY'
+import re, subprocess, sys, yaml
+from pathlib import Path
+root = Path(sys.argv[1]); charts = root / "platform" / ".runtime" / "charts"
+releases = set()
+for name, chart, namespace, values in re.findall(r'helm upgrade --install (\S+) "\$CHARTS/([^"]+)" -n (\S+)[^\n]*?-f "\$ROOT/([^"]+)"', (root / "platform/gitops/bootstrap.sh").read_text()):
+  releases.add((name, charts / chart, namespace, root / values))
+for element in re.findall(r"\{app: ([^,]+), kind: helm, namespace: ([^,]+), [^}]*chart: charts/([^,]+), values: ([^}]+)\}", (root / "platform/gitops/applicationset.yaml").read_text()):
+  releases.add((element[0], charts / element[2].strip(), element[1], root / "platform" / element[3].strip()))
+claims, bad = 0, []
+for name, chart, namespace, values in sorted(releases, key=str):
+  rendered = subprocess.run(["helm", "template", name, str(chart), "-n", namespace, "-f", str(values)], check=True, capture_output=True, text=True).stdout
+  for document in yaml.safe_load_all(rendered):
+    if not document: continue
+    kind, spec = document.get("kind"), document.get("spec") or {}
+    found = []
+    if kind == "PersistentVolumeClaim": found = [spec.get("storageClassName")]
+    elif kind == "StatefulSet": found = [t["spec"].get("storageClassName") for t in spec.get("volumeClaimTemplates") or []]
+    elif kind == "VMSingle" and spec.get("storage"): found = [spec["storage"].get("storageClassName")]
+    elif kind == "VMAlertmanager" and spec.get("storage"): found = [spec["storage"].get("volumeClaimTemplate", {}).get("spec", {}).get("storageClassName")]
+    for value in found:
+      claims += 1
+      if value != "platform-ebs-gp2": bad.append(f"{values.name}:{kind}/{document['metadata']['name']}={value}")
+assert len(releases) >= 7, f"expected at least 7 Helm releases, found {len(releases)}"
+assert claims > 0, "no rendered claims"
+assert not bad, "rendered claims outside platform-ebs-gp2: " + ", ".join(bad)
+print(f"PASS rendered-claims releases={len(releases)} claims={claims} class=platform-ebs-gp2")
+PY
+else
+  echo "SKIP rendered-claims: run bash scripts/fetch-charts.sh to render the pinned charts"
 fi
 if command -v terraform >/dev/null; then
   terraform -chdir="$ROOT/infrastructure/terraform" fmt -check -recursive
@@ -130,12 +162,24 @@ fi
 if command -v cfn-lint >/dev/null; then cfn-lint "$ROOT"/infrastructure/cloudformation/*.yaml; fi
 if [[ "$MODE" == "--runtime" ]]; then
   kubectl wait --for=condition=Ready nodes --all --timeout=10m
-  kubectl get storageclass ec2-instance-store-sc >/dev/null
-  kubectl apply -f "$ROOT/platform/components/instance-store/smoke-test.yaml"
-  cleanup_runtime_fixture(){ kubectl delete namespace lis-csi-test --ignore-not-found --wait=false >/dev/null; }
+  [[ "$(kubectl get storageclass platform-ebs-gp2 -o jsonpath='{.provisioner}/{.parameters.type}')" == ebs.csi.aws.com/gp2 ]] || { echo "platform-ebs-gp2 is not an EBS CSI gp2 class" >&2; exit 1; }
+  # Force a fresh credential fetch under the enforced NetworkPolicy before the smoke volume, then prove the
+  # controller reaches the instance profile endpoint and not the Pod Identity agent endpoint.
+  kubectl -n kube-system rollout restart deployment/ebs-csi-controller
+  kubectl -n kube-system rollout status deployment/ebs-csi-controller --timeout=10m
+  kubectl apply -f "$ROOT/platform/components/storage/smoke-test.yaml"
+  cleanup_runtime_fixture(){ kubectl delete namespace ebs-csi-test --ignore-not-found --wait=false >/dev/null; }
   trap cleanup_runtime_fixture EXIT
-  kubectl -n lis-csi-test wait --for=condition=Ready pod/local-nvme-smoke --timeout=10m
-  kubectl -n lis-csi-test exec local-nvme-smoke -- test -s /data/sentinel
+  kubectl -n ebs-csi-test wait --for=condition=Ready pod/ebs-gp2-smoke --timeout=10m
+  controller_pod=$(kubectl -n kube-system get pod -l app=ebs-csi-controller -o jsonpath='{.items[0].metadata.name}')
+  credential_probe=$(kubectl -n kube-system debug "pod/$controller_pod" --image=harbor.local/library/busybox:1.37.0 --attach=true --quiet --container=credential-probe -- sh -c 'nc -z -w 5 169.254.169.254 80 && echo imds=open || echo imds=closed; nc -z -w 5 169.254.170.23 80 && echo agent=open || echo agent=closed')
+  [[ "$credential_probe" == *imds=open* && "$credential_probe" == *agent=closed* ]] || { echo "EBS CSI controller credential path differs: $credential_probe" >&2; exit 1; }
+  kubectl -n kube-system rollout restart deployment/ebs-csi-controller
+  kubectl -n kube-system rollout status deployment/ebs-csi-controller --timeout=10m
+  kubectl -n ebs-csi-test exec ebs-gp2-smoke -- test -s /data/sentinel
+  smoke_pv=$(kubectl -n ebs-csi-test get pvc ebs-gp2 -o jsonpath='{.spec.volumeName}')
+  [[ "$(kubectl get pv "$smoke_pv" -o jsonpath='{.spec.csi.driver}')" == ebs.csi.aws.com ]] || { echo "smoke volume was not provisioned by the EBS CSI driver" >&2; exit 1; }
+  kubectl get pvc -A -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); ns={"registry-local","git-local","monitoring","victorialogs"}; claims=[x for x in d["items"] if x["metadata"]["namespace"] in ns]; bad=[x["metadata"]["namespace"]+"/"+x["metadata"]["name"] for x in claims if x["spec"].get("storageClassName")!="platform-ebs-gp2" or x.get("status",{}).get("phase")!="Bound"]; assert claims, "no platform claims found"; assert not bad, "platform claims not bound to platform-ebs-gp2: "+str(bad)'
   kubectl -n registry-local rollout status deployment/harbor-core --timeout=10m
   kubectl -n git-local rollout status deployment/gitea --timeout=10m
   kubectl -n kube-system rollout status daemonset/node-local-dns --timeout=10m

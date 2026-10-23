@@ -1,12 +1,13 @@
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: ec2-instance-store-sc
+  name: platform-ebs-gp2
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
-provisioner: lis.csi.aws.com
+provisioner: ebs.csi.aws.com
 parameters:
-  throttling: "true"
+  type: gp2
+  encrypted: "true"
 volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: false
+allowVolumeExpansion: true
 reclaimPolicy: Delete

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Amazon EKS local clusters on AWS Outposts configured with EC2 instance store
+Description: Platform Engineering demo on Amazon EKS local clusters on AWS Outposts, local cluster
 Parameters:
   ClusterName: {Type: String, Default: platform-outposts}
   KubernetesVersion: {Type: String}

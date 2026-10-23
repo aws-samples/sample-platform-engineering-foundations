@@ -2,7 +2,7 @@
 
 ## Goal
 
-Amazon EKS local clusters on AWS Outposts configured with EC2 instance store runs the Kubernetes API, etcd, self-managed workers, and the platform services on the Outpost. Regional APIs are required for provisioning and reconciliation of regional AWS resources. Local Git, registry, metrics, logs, DNS cache, and policy enforcement keep operating when the regional link is unavailable.
+The Platform Engineering demo on Amazon EKS local clusters on AWS Outposts runs the Kubernetes API, etcd, self-managed workers, and the platform services on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost. Regional APIs are required for provisioning and reconciliation of regional AWS resources. Local Git, registry, metrics, logs, DNS cache, and policy enforcement keep operating when the regional link is unavailable.
 
 ## Two infrastructure fronts, one platform
 
@@ -10,15 +10,21 @@ CloudFormation and Terraform provision equivalent network, cluster, node, add-on
 
 | Stage | CloudFormation path | Terraform path | Shared outcome |
 |---|---|---|---|
-| Infrastructure | Deploy stacks | Apply Terraform modules | Network, cluster, nodes, add-ons, and Pod Identity resources |
+| Infrastructure | Deploy stacks | Apply Terraform modules | Network, cluster, nodes with `AmazonEBSCSIDriverPolicy` on the node role, add-ons, and Pod Identity resources |
 | Contract | Emit `platform-contract.json` | Emit `platform-contract.json` | One normalized interface for the platform layer |
-| Platform | Use the shared bootstrap | Use the shared bootstrap | Local Git, registry, Argo CD, and GitOps-managed services |
+| Platform | Use the shared bootstrap | Use the shared bootstrap | EBS CSI driver and StorageClass, local Git, registry, Argo CD, and GitOps-managed services |
 
-The contract contains the cluster name, Region, account identifier, Outpost ARN, Kubernetes version, registry service IP, and local Git URL. It contains no credentials.
+The contract contains the cluster name, Region, account identifier, Outpost ARN, Kubernetes version, registry service IP, network ranges, the credential endpoint of the EBS CSI controller, and the local Git URL. It contains no credentials.
+
+## Storage
+
+- The shared bootstrap installs the `aws-ebs-csi-driver` EKS add-on at a pinned version and applies `platform-ebs-gp2` (`ebs.csi.aws.com`, `type: gp2`, encrypted, `WaitForFirstConsumer`). Outposts offer gp2 only.
+- The driver uses the worker node instance profile, so it has credentials from node boot, before any per-pod identity agent runs. Both fronts attach `AmazonEBSCSIDriverPolicy` to the node role. The controller NetworkPolicy allows port 80 only to the instance metadata endpoint.
+- Harbor, Gitea, VictoriaMetrics, Grafana, Alertmanager, and VictoriaLogs name `platform-ebs-gp2` explicitly. The class is not the cluster default.
 
 ## Local dependency chain
 
-1. The instance store CSI add-on provides ephemeral local volumes.
+1. The EBS CSI driver and `platform-ebs-gp2` provide persistent volumes on the Outpost.
 2. Harbor and Gitea start while connected.
 3. Images and pinned Helm charts are copied locally. Harbor's final local image references are pre-pulled to every current node before the release switches away from upstream references.
 4. Argo CD reads the platform repository from Gitea.
@@ -26,7 +32,8 @@ The contract contains the cluster name, Region, account identifier, Outpost ARN,
 
 ## Failure boundaries
 
-- Instance store data is lost with its node. Network disconnection and node loss are different failure modes.
+- During a network disconnect, pods backed by Amazon EBS cannot be created, updated, or scaled, because volume operations call the regional EBS API. Schedule platform changes and node replacement while connected.
+- EBS snapshots are created in the AWS Region and cannot be created or deleted during a disconnect.
 - Pod Identity, S3, DynamoDB, and other regional APIs stop reconciling when the regional link is unavailable.
 - A cold replacement node cannot bootstrap from the local registry until routing, DNS, trust, and the registry are available.
-- The implementation has not been validated on an EC2 instance store Outpost. Run the validation contract before describing it as hardware-validated.
+- This assembled package has not been deployed end to end. See the validation boundary in the [README](../README.md#validation-boundary).

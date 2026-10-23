@@ -235,6 +235,9 @@ def emitted_contracts(root, findings):
         )
     contracts = [json.loads(terraform.stdout), json.loads(cloudformation.stdout)]
     for name, contract in zip(("Terraform", "CloudFormation"), contracts):
+        if contract.get("ebs_csi_controller_credential_cidr") != IMDS_CIDR:
+            findings.append(f"{name} contract does not point the EBS CSI controller at the instance profile endpoint {IMDS_CIDR}")
+    for name, contract in zip(("Terraform", "CloudFormation"), contracts):
         if set(contract) != CONTRACT_KEYS:
             findings.append(f"{name} contract keys differ: {sorted(set(contract) ^ CONTRACT_KEYS)}")
     if contracts[0] != contracts[1]:
@@ -281,10 +284,72 @@ def check_structure(root, findings):
     )
     if re.search(r'addon_name\s*=\s*"vpc-cni"|AddonName:\s*vpc-cni', infrastructure_text):
         findings.append("An infrastructure front declares the VPC CNI add-on")
+    if re.search(r'addon_name\s*=\s*"aws-ebs-csi-driver"|AddonName:\s*aws-ebs-csi-driver', infrastructure_text):
+        findings.append("An infrastructure front declares the Amazon EBS CSI driver add-on")
     bootstrap = (root / "platform" / "gitops" / "bootstrap.sh").read_text(encoding="utf-8")
-    for addon in ("aws-ec2-local-instance-store-csi-driver", "eks-pod-identity-agent", "coredns", "fluent-bit", "vpc-cni"):
+    for addon in ("aws-ebs-csi-driver", "eks-pod-identity-agent", "coredns", "fluent-bit", "vpc-cni"):
         if not re.search(rf'ensure_addon\s+{re.escape(addon)}\b', bootstrap):
             findings.append(f"Shared bootstrap does not own final configuration for {addon}")
+
+
+EBS_CSI_POLICY = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+STORAGE_CLASS = "platform-ebs-gp2"
+IMDS_CIDR = "169.254.169.254/32"
+INSTANCE_STORE_TOKENS = ("lis.csi.aws.com", "ec2-instance-store-sc", "aws-ec2-local-instance-store-csi-driver", "components/instance-store", "INSTANCE_STORE")
+
+
+def check_ebs_storage(root, findings):
+    cfn = root / "infrastructure" / "cloudformation"
+    terraform = root / "infrastructure" / "terraform"
+    node_roles = [value["Properties"] for value in load_cfn(cfn / "nodes.yaml")["Resources"].values() if value["Type"] == "AWS::IAM::Role"]
+    if len(node_roles) != 1 or EBS_CSI_POLICY not in (node_roles[0].get("ManagedPolicyArns") or []):
+        findings.append("CloudFormation node role does not carry AmazonEBSCSIDriverPolicy")
+    nodes = (terraform / "modules" / "nodes" / "main.tf").read_text(encoding="utf-8")
+    attachments = blocks(nodes, r'resource "aws_iam_role_policy_attachment" "ebs_csi"')
+    if not attachments or hcl_string(attachments[0], "policy_arn") != EBS_CSI_POLICY:
+        findings.append("Terraform node role does not attach AmazonEBSCSIDriverPolicy")
+    elif not re.search(r"^\s*count\s*=\s*var\.attach_ebs_csi_policy\s*\?\s*1\s*:\s*0\s*$", attachments[0], re.M):
+        findings.append("Terraform EBS CSI node policy attachment is not driven by attach_ebs_csi_policy")
+    node_modules = blocks((terraform / "main.tf").read_text(encoding="utf-8"), r'module "nodes"')
+    if not node_modules or not re.search(r"^\s*attach_ebs_csi_policy\s*=\s*var\.node_attach_ebs_csi_policy\s*$", node_modules[0], re.M):
+        findings.append("Terraform root does not pass node_attach_ebs_csi_policy to the nodes module")
+    variables = (terraform / "variables.tf").read_text(encoding="utf-8")
+    variable_blocks = blocks(variables, r'variable "node_attach_ebs_csi_policy"')
+    if not variable_blocks or not re.search(r"^\s*default\s*=\s*true\s*$", variable_blocks[0], re.M):
+        findings.append("Terraform EBS CSI node policy default is not true")
+    if not re.search(r"^node_attach_ebs_csi_policy\s*=\s*true\s*$", (terraform / "terraform.tfvars.example").read_text(encoding="utf-8"), re.M):
+        findings.append("Terraform example does not attach the EBS CSI node policy that the CloudFormation front attaches")
+    classes = [document for document in yaml.safe_load_all((root / "platform" / "components" / "storage" / "storageclass.yaml").read_text(encoding="utf-8")) if document]
+    if len(classes) != 1 or classes[0].get("metadata", {}).get("name") != STORAGE_CLASS or classes[0].get("provisioner") != "ebs.csi.aws.com" or (classes[0].get("parameters") or {}).get("type") != "gp2":
+        findings.append("Platform StorageClass is not the EBS CSI gp2 class")
+    elif (classes[0].get("metadata", {}).get("annotations") or {}).get("storageclass.kubernetes.io/is-default-class") != "false":
+        findings.append("Platform StorageClass must not be the cluster default")
+    bootstrap = (root / "platform" / "gitops" / "bootstrap.sh").read_text(encoding="utf-8")
+    apply_class = 'kubectl apply -f "$ROOT/platform/components/storage/storageclass.yaml"'
+    positions = [bootstrap.find(token) for token in ('ensure_addon aws-ebs-csi-driver "$EBS_CSI_ADDON_VERSION"', apply_class, "helm upgrade")]
+    if -1 in positions[:2]:
+        findings.append("Shared bootstrap does not install the EBS CSI driver and apply the platform StorageClass")
+    elif not (positions[0] < positions[1] < positions[2]):
+        findings.append("Shared bootstrap must install the EBS CSI driver, then the StorageClass, before any Helm release")
+    policies = (root / "platform" / "components" / "network-policies" / "01-kube-system-addons.yaml").read_text(encoding="utf-8")
+    controller = [document for document in yaml.safe_load_all(policies) if document and document["metadata"]["name"] == "ebs-csi-controller"]
+    credential_rules = [rule for rule in (controller[0]["spec"].get("egress") or []) if {"ipBlock": {"cidr": "${EBS_CSI_CONTROLLER_CREDENTIAL_CIDR}"}} in (rule.get("to") or [])] if controller else []
+    if not any({"protocol": "TCP", "port": 80} in (rule.get("ports") or []) for rule in credential_rules):
+        findings.append("ebs-csi-controller NetworkPolicy does not allow TCP 80 to the contract credential endpoint")
+    references = 0
+    for path in sorted((root / "platform" / "gitops" / "values").glob("*.yaml")):
+        for match in re.finditer(r"storageClass(?:Name)?:\s*([^,}\s]+)", path.read_text(encoding="utf-8")):
+            references += 1
+            if match.group(1) != STORAGE_CLASS:
+                findings.append(f"{path.relative_to(root)} uses StorageClass {match.group(1)}")
+    if references == 0:
+        findings.append("No platform values reference the platform StorageClass")
+    for path in root.rglob("*"):
+        if path.is_file() and ".runtime" not in path.parts and path.name not in {"CHANGELOG.md", "check-iac-parity.py"}:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for token in INSTANCE_STORE_TOKENS:
+                if token in text:
+                    findings.append(f"{path.relative_to(root)} still references instance store: {token}")
 
 
 def check_crossplane_identity(root, findings):
@@ -364,6 +429,7 @@ def check(root):
     try:
         emitted_contracts(root, findings)
         check_structure(root, findings)
+        check_ebs_storage(root, findings)
         check_crossplane_identity(root, findings)
     except (KeyError, ValueError, yaml.YAMLError, subprocess.CalledProcessError) as error:
         findings.append(f"Parity checker could not evaluate the repository: {error}")
@@ -378,6 +444,18 @@ def mutation_controls(root):
         ("Terraform permission drift", "infrastructure/terraform/crossplane-identity.tf", '"s3:ListAllMyBuckets"]', '"s3:ListAllMyBuckets", "iam:PassRole"]'),
         ("front-owned VPC CNI", "infrastructure/terraform/main.tf", 'module "network" {', 'resource "aws_eks_addon" "unexpected" { addon_name = "vpc-cni" }\n\nmodule "network" {'),
         ("missing CFN identity step", "infrastructure/cloudformation/deploy.sh", '"$ROOT/infrastructure/cloudformation/crossplane-identity.yaml"', '"$ROOT/infrastructure/cloudformation/identity-missing.yaml"'),
+        ("front-owned EBS CSI", "infrastructure/terraform/modules/addons/main.tf", 'resource "aws_eks_addon" "kube_proxy" {', 'resource "aws_eks_addon" "unexpected" { addon_name = "aws-ebs-csi-driver" }\n\nresource "aws_eks_addon" "kube_proxy" {'),
+        ("CloudFormation EBS CSI node policy removed", "infrastructure/cloudformation/nodes.yaml", "        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy\n", ""),
+        ("Terraform example EBS CSI node policy disabled", "infrastructure/terraform/terraform.tfvars.example", "node_attach_ebs_csi_policy   = true", "node_attach_ebs_csi_policy   = false"),
+        ("platform values StorageClass drift", "platform/gitops/values/gitea.yaml", "storageClass: platform-ebs-gp2", "storageClass: gp3"),
+        ("StorageClass provisioner drift", "platform/components/storage/storageclass.yaml", "provisioner: ebs.csi.aws.com", "provisioner: lis.csi.aws.com"),
+        ("StorageClass becomes the default", "platform/components/storage/storageclass.yaml", 'is-default-class: "false"', 'is-default-class: "true"'),
+        ("controller credential points at Pod Identity", "scripts/emit-contract.py", '"169.254.169.254/32"', '"169.254.170.23/32"'),
+        ("controller credential port drift", "platform/components/network-policies/01-kube-system-addons.yaml", "  - to: [{ipBlock: {cidr: \"${EBS_CSI_CONTROLLER_CREDENTIAL_CIDR}\"}}]\n    ports: [{protocol: TCP, port: 80}]", "  - to: [{ipBlock: {cidr: \"${EBS_CSI_CONTROLLER_CREDENTIAL_CIDR}\"}}]\n    ports: [{protocol: TCP, port: 8080}]"),
+        ("Terraform root stops passing the node policy flag", "infrastructure/terraform/main.tf", "attach_ebs_csi_policy = var.node_attach_ebs_csi_policy", "attach_ebs_csi_policy = false"),
+        ("Terraform node policy attachment disabled", "infrastructure/terraform/modules/nodes/main.tf", "count = var.attach_ebs_csi_policy ? 1 : 0", "count = 0"),
+        ("StorageClass missing from bootstrap", "platform/gitops/bootstrap.sh", 'kubectl apply -f "$ROOT/platform/components/storage/storageclass.yaml"\n', ""),
+        ("EBS CSI driver installed after a Helm release", "platform/gitops/bootstrap.sh", 'ensure_addon aws-ebs-csi-driver "$EBS_CSI_ADDON_VERSION"\nensure_addon eks-pod-identity-agent "$POD_IDENTITY_AGENT_VERSION"\nkubectl apply -f "$ROOT/platform/components/storage/storageclass.yaml"\n', 'ensure_addon eks-pod-identity-agent "$POD_IDENTITY_AGENT_VERSION"\nhelm upgrade --install early \"$CHARTS/early\"\nensure_addon aws-ebs-csi-driver "$EBS_CSI_ADDON_VERSION"\nkubectl apply -f "$ROOT/platform/components/storage/storageclass.yaml"\n'),
     ]
     passed = 0
     for name, relative, old, new in controls:

@@ -143,11 +143,6 @@ variable "node_protect_from_scale_in" {
 
 
 
-variable "enable_ebs_csi_driver" {
-  type    = bool
-  default = true
-}
-
 variable "addon_versions" {
   type    = map(string)
   default = {}

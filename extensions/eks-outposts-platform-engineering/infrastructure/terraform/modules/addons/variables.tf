@@ -2,12 +2,6 @@ variable "cluster_name" {
   type = string
 }
 
-
-variable "enable_ebs_csi_driver" {
-  type    = bool
-  default = true
-}
-
 variable "enable_pod_identity_agent" {
   type    = bool
   default = false
@@ -18,7 +12,7 @@ variable "addon_versions" {
   default = {}
 
   validation {
-    condition     = length(setsubtract(keys(var.addon_versions), ["kube-proxy", "coredns", "aws-ebs-csi-driver", "eks-pod-identity-agent"])) == 0
+    condition     = length(setsubtract(keys(var.addon_versions), ["kube-proxy", "coredns", "eks-pod-identity-agent"])) == 0
     error_message = "Invalid input for this sample."
   }
 }
@@ -28,7 +22,7 @@ variable "core_addon_configuration_values" {
   default = {}
 
   validation {
-    condition     = length(setsubtract(keys(var.core_addon_configuration_values), ["kube-proxy", "coredns", "aws-ebs-csi-driver"])) == 0
+    condition     = length(setsubtract(keys(var.core_addon_configuration_values), ["kube-proxy", "coredns"])) == 0
     error_message = "Invalid input for this sample."
   }
 
