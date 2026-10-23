@@ -13,6 +13,7 @@ All notable changes to the Platform Engineering demo on Amazon EKS local cluster
 - The parity gate checks EBS CSI ownership and bootstrap order, the node policy wiring in both fronts, the controller credential endpoint and its NetworkPolicy rule, the StorageClass, and values references, each with a mutation control. `bash scripts/validate.sh` renders the fetched charts and requires every claim to use the platform class.
 - Upgrading an existing Terraform state: the add-on module no longer manages the EBS CSI driver. Run `terraform state rm 'module.addons.aws_eks_addon.ebs_csi_driver[0]'` before the next apply so Terraform does not delete the add-on, then run the shared bootstrap, which adopts it.
 - Documented the hardware boundary of the source implementation and the documented EBS limits during a network disconnect.
+- Added the official instance-store local-cluster path immediately after the EBS limitation: the local control plane keeps applications and cluster operations available during disconnection when local dependencies are prepared, while Region-backed EBS, IRSA, and Pod Identity constraints remain explicit.
 
 ## 2026-10-22
 
