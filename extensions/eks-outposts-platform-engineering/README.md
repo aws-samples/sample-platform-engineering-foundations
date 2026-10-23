@@ -1,5 +1,17 @@
 # Platform Engineering demo on Amazon EKS local clusters on AWS Outposts
 
+## Document information
+
+| Field | Value |
+|---|---|
+| Author | Bruno de Castro Lopes |
+| Role | Sr. Specialist Solutions Architect, Containers/Kubernetes |
+| Team | AWS LATAM Containers |
+| Scope | Platform Engineering on Amazon EKS local clusters on AWS Outposts |
+| Document status | Reference implementation |
+| Last updated | October 23, 2026 |
+| Contact | [@brunokktro](https://github.com/brunokktro) |
+
 This extension is a Platform Engineering demo that runs on [Amazon EKS local clusters on AWS Outposts](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-local-cluster-overview.html). The Kubernetes control plane, self-managed worker nodes, and a local platform (Git, registry, GitOps, observability, DNS caching, NetworkPolicies, and Crossplane recipes) run on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost through the Amazon EBS CSI driver. The extension does not change the repository's existing workshop or self-paced flow.
 
 ## Choose one infrastructure front

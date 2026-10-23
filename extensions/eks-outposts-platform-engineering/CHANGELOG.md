@@ -4,6 +4,8 @@ All notable changes to the Platform Engineering demo on Amazon EKS local cluster
 
 ## 2026-10-23
 
+- Added the landing-page document information block with author, role, team, scope, status, last-updated date, and maintainer contact.
+
 - Renamed the extension to the Platform Engineering demo on Amazon EKS local clusters on AWS Outposts, in the README, both IaC fronts, the docs, and the root README Related Demo reference.
 - Replaced the EC2 instance store storage path with Amazon EBS gp2 through the Amazon EBS CSI driver. Removed the instance store CSI add-on, its StorageClass, smoke test, and node preflight.
 - The shared bootstrap now installs the pinned `aws-ebs-csi-driver` add-on (`EBS_CSI_ADDON_VERSION` replaces `INSTANCE_STORE_CSI_VERSION`) and applies the `platform-ebs-gp2` StorageClass. Every platform chart, including the Harbor job log volume, names that class.
