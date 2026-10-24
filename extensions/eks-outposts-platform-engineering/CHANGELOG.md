@@ -4,6 +4,7 @@ All notable changes to the Platform Engineering demo on Amazon EKS local cluster
 
 ## 2026-10-23
 
+- Added the editable AWS architecture diagram and embedded-source PNG to the extension landing page and architecture document. The Blog Figure mirrors the official EKS local-cluster boundary, adds the local platform and Regional lifecycle dependencies, and passes the five `aws-architecture-diagram` geometry gates.
 - Added the landing-page document information block with author, role, team, scope, status, last-updated date, and maintainer contact.
 
 - Renamed the extension to the Platform Engineering demo on Amazon EKS local clusters on AWS Outposts, in the README, both IaC fronts, the docs, and the root README Related Demo reference.

@@ -14,6 +14,14 @@
 
 This extension is a Platform Engineering demo that runs on [Amazon EKS local clusters on AWS Outposts](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-local-cluster-overview.html). The Kubernetes control plane, self-managed worker nodes, and a local platform (Git, registry, GitOps, observability, DNS caching, NetworkPolicies, and Crossplane recipes) run on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost through the Amazon EBS CSI driver. The extension does not change the repository's existing workshop or self-paced flow.
 
+## Architecture
+
+![CloudFormation and Terraform are alternative infrastructure inputs to a shared platform contract. Inside a customer data center, an AWS Outposts rack runs the EKS local control plane, self-managed worker nodes, Gitea, Harbor, Argo CD, local metrics and logs, NodeLocal DNS, NetworkPolicies, platform applications, Crossplane, and Amazon EBS gp2. A dashed Service Link connects the local cluster to EKS management, EBS, IAM, ECR, S3, and DynamoDB APIs in the AWS Region, with a labeled disconnection marker showing that Regional calls stop while local paths continue.](docs/images/eks-outposts-platform-engineering.png)
+
+*Figure 1: Two equivalent IaC fronts converge on one locally operated platform. The layout mirrors the official [Amazon EKS local-cluster architecture](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-local-cluster-overview.html) and adds the platform components and connected-versus-disconnected operating boundary implemented by this extension.*
+
+The editable source is [`docs/diagrams/eks-outposts-platform-engineering.drawio`](docs/diagrams/eks-outposts-platform-engineering.drawio). The PNG embeds the same draw.io XML and remains editable.
+
 ## Choose one infrastructure front
 
 | Front | Entry point | State and rollback | Best fit |

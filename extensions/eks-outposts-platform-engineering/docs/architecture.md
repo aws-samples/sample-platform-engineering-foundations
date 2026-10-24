@@ -4,6 +4,10 @@
 
 The Platform Engineering demo on Amazon EKS local clusters on AWS Outposts runs the Kubernetes API, etcd, self-managed workers, and the platform services on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost. Regional APIs are required for provisioning and reconciliation of regional AWS resources. Local Git, registry, metrics, logs, DNS cache, and policy enforcement keep operating when the regional link is unavailable.
 
+![CloudFormation and Terraform are alternative infrastructure inputs to a shared platform contract. Inside a customer data center, an AWS Outposts rack runs the EKS local control plane, self-managed worker nodes, Gitea, Harbor, Argo CD, local observability, DNS and policy services, platform applications, Crossplane, and Amazon EBS gp2. A dashed Service Link reaches Regional lifecycle APIs and a labeled disconnection marker separates the local paths that continue from the Regional calls that stop.](images/eks-outposts-platform-engineering.png)
+
+*Figure 1: Current architecture and the connected-versus-disconnected operating boundary. The editable source is [eks-outposts-platform-engineering.drawio](diagrams/eks-outposts-platform-engineering.drawio).*
+
 ## Two infrastructure fronts, one platform
 
 CloudFormation and Terraform provision equivalent network, cluster, node, add-on, and Pod Identity resources. Each front emits `platform-contract.json`. The shared bootstrap is the only consumer of that contract and the only implementation of the platform layer.
