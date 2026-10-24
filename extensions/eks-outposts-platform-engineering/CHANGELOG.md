@@ -2,6 +2,11 @@
 
 All notable changes to the Platform Engineering demo on Amazon EKS local clusters on AWS Outposts are documented here.
 
+## 2026-10-24
+
+- Scoped the architecture diagram to short Service Link disconnections: the Amazon EBS gp2 data plane on the Outpost now carries a short-disconnections-only marker, because re-replication needs the Amazon EBS control plane in the Region.
+- Added Figure 2, which compares the implemented EBS-backed Outpost for short disconnections with the instance-store Outpost for prolonged disconnections that this extension does not implement. Status uses words and glyphs, and the not-implemented column uses a dashed border. Both figures pass the five `aws-architecture-diagram` geometry gates.
+
 ## 2026-10-23
 
 - Added the editable AWS architecture diagram and embedded-source PNG to the extension landing page and architecture document. The Blog Figure mirrors the official EKS local-cluster boundary, adds the local platform and Regional lifecycle dependencies, and passes the five `aws-architecture-diagram` geometry gates.

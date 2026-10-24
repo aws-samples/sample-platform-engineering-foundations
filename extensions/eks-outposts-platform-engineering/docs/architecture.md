@@ -4,9 +4,9 @@
 
 The Platform Engineering demo on Amazon EKS local clusters on AWS Outposts runs the Kubernetes API, etcd, self-managed workers, and the platform services on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost. Regional APIs are required for provisioning and reconciliation of regional AWS resources. Local Git, registry, metrics, logs, DNS cache, and policy enforcement keep operating when the regional link is unavailable.
 
-![CloudFormation and Terraform are alternative infrastructure inputs to a shared platform contract. Inside a customer data center, an AWS Outposts rack runs the EKS local control plane, self-managed worker nodes, Gitea, Harbor, Argo CD, local observability, DNS and policy services, platform applications, Crossplane, and Amazon EBS gp2. A dashed Service Link reaches Regional lifecycle APIs and a labeled disconnection marker separates the local paths that continue from the Regional calls that stop.](images/eks-outposts-platform-engineering.png)
+![CloudFormation and Terraform are alternative infrastructure inputs to a shared platform contract. Inside a customer data center, an AWS Outposts rack runs the EKS local control plane, self-managed worker nodes, Gitea, Harbor, Argo CD, local observability, DNS and policy services, platform applications, Crossplane, and the Amazon EBS gp2 data plane, marked for short disconnections only because re-replication needs the Region. A dashed Service Link reaches Regional lifecycle APIs, including the Amazon EBS control plane, and a labeled disconnection marker separates the local paths that continue from the Regional calls that stop.](images/eks-outposts-platform-engineering.png)
 
-*Figure 1: Current architecture and the connected-versus-disconnected operating boundary. The editable source is [eks-outposts-platform-engineering.drawio](diagrams/eks-outposts-platform-engineering.drawio).*
+*Figure 1: Current architecture, designed for short Service Link disconnections, and the connected-versus-disconnected operating boundary. The editable source is [eks-outposts-platform-engineering.drawio](diagrams/eks-outposts-platform-engineering.drawio).*
 
 ## Two infrastructure fronts, one platform
 
@@ -34,6 +34,10 @@ The cluster control-plane backing store and the workload persistent-storage path
 - The implemented workload path is Amazon EBS. It is durable on the Outpost, but volume mutations and snapshots require Regional APIs.
 - A platform that must mutate stateful workloads during a prolonged disconnect needs a locally reachable alternative storage mechanism. The primary candidate is an enterprise array with a vendor-supported Kubernetes CSI driver. Replicated software-defined storage is an alternative with higher node, disk, network, and operational overhead.
 - The EC2 Local Instance Store CSI Driver is an ephemeral option, not a durable replacement for the platform claims. It remains outside the automatic deployment and has not been validated on an EKS local cluster.
+
+![Two columns compare Outpost storage configurations by disconnect duration. The left column, marked Implemented with a solid border, is the EBS-backed Outpost used by this extension for short disconnections: the Amazon EBS gp2 data plane and its volumes live on the Outpost, the EBS control plane lives in the AWS Region, bound claims keep running while disconnected, create, attach, resize, snapshot and re-replication wait for the Region, and risk grows with disconnect duration. The right column, marked Not implemented by this extension with a dashed border, is the instance-store Outpost without Amazon EBS for prolonged disconnections: the control plane and etcd run on EC2 instance store, the Local Instance Store CSI driver holds ephemeral data only, and durable workload data needs an on-premises NetApp ONTAP array with Trident CSI outside the rack, shown as a candidate that is not deployed.](images/eks-outposts-storage-options.png)
+
+*Figure 2: Choose the Outpost storage configuration by disconnect duration. This extension implements the EBS-backed configuration. The editable source is [eks-outposts-storage-options.drawio](diagrams/eks-outposts-storage-options.drawio).*
 
 The complete recommendation, prerequisites, validation status, and sources are in [Storage strategy](../platform/components/storage/README.md).
 
