@@ -15,7 +15,7 @@ Developer Platforms (IDPs) on Amazon EKS.
 
 This repository is the **code**. The guided, step-by-step content lives in a separate workshop:
 
-**[Platform Engineering Foundations on AWS](https://studio.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092)**
+**[Platform Engineering Foundations on AWS](https://catalog.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092)**
 
 If you landed here first, start there: it walks the labs in order and explains the reasoning behind
 each step. This repository is what the workshop clones and applies.
@@ -43,7 +43,7 @@ This repository holds the **code** used by the *Platform Engineering Foundations
 You can consume it two ways:
 
 - **Guided** - follow the workshop on AWS Workshop Studio, which walks through each lab in order:
-  [Platform Engineering Foundations on AWS](https://studio.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092)
+  [Platform Engineering Foundations on AWS](https://catalog.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092)
 - **Self-paced** - deploy the same two CloudFormation stacks in your own account, from this
   repository, and follow the same workshop content at your own pace. The commands are in
   [Getting Started](#getting-started) below and on the workshop's **0.1 Self-Paced Setup** page;
@@ -134,7 +134,7 @@ See [docs/architecture.md](docs/architecture.md) for the reasoning behind the to
 
 The step-by-step walkthrough, with screenshots and the reasoning behind each step, is the
 **0.1 Self-Paced Setup** page of the
-[workshop](https://studio.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092).
+[workshop](https://catalog.us-east-1.prod.workshops.aws/workshops/7dfe6b37-0fe8-403e-8ab4-e1c56baea092).
 The commands below are the same sequence, for reference.
 
 ### Prerequisites
