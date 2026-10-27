@@ -1,0 +1,17 @@
+apiVersion: kro.run/v1alpha1
+kind: DynamoDBTable
+metadata:
+  name: e2e-dp-1022-tbl
+  namespace: appmod
+  labels:
+    platform.appmod/owner: platform-admin
+    platform.appmod/managed-by: "platform-assistant"
+    platform.appmod/plan-id: "1ca258fca6d7a5b3343239cfcbac06cd"
+    platform.appmod/plan-step: "tbl"
+    platform.appmod/project: "agent-platform"
+    platform.appmod/requester: "platform-admin"
+spec:
+  "environment": "dev"
+  "hashKeyName": "pk"
+  "hashKeyType": "S"
+  "name": "e2e-dp-1022-tbl"

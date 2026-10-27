@@ -1,0 +1,515 @@
+{
+ "capabilities": {
+  "app/serverless-multi-tier/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Serverless multi-tier app",
+   "displayNamePt": "App serverless multi-tier",
+   "goldenPath": "GP-A1",
+   "id": "app/serverless-multi-tier/v1",
+   "kind": "ServerlessMultiTier",
+   "lifecycle": "preview",
+   "outputs": [
+    "apiEndpoint",
+    "frontendBucket",
+    "functionArn",
+    "postsTableArn",
+    "usersTableArn"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "bucketSuffix": {
+      "type": "string"
+     },
+     "environment": {
+      "default": "dev",
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "s3Bucket": {
+      "type": "string"
+     },
+     "s3Key": {
+      "default": "function-python-users-posts.zip",
+      "type": "string"
+     },
+     "size": {
+      "default": "medium",
+      "enum": [
+       "small",
+       "medium",
+       "large",
+       "xlarge"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "s3Bucket",
+     "bucketSuffix"
+    ],
+    "title": "ServerlessMultiTier",
+    "type": "object"
+   }
+  },
+  "compute/inference-ecs/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Model inference on ECS Fargate",
+   "displayNamePt": "Inference de modelo no ECS Fargate",
+   "goldenPath": "GP-B",
+   "id": "compute/inference-ecs/v1",
+   "kind": "InferenceECS",
+   "lifecycle": "preview",
+   "outputs": [
+    "clusterArn",
+    "runningCount",
+    "serviceArn",
+    "serviceStatus"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "containerPort": {
+      "default": 8080,
+      "type": "integer"
+     },
+     "environment": {
+      "default": "dev",
+      "enum": [
+       "dev",
+       "lab",
+       "internal",
+       "demo",
+       "prod"
+      ],
+      "type": "string"
+     },
+     "healthPath": {
+      "default": "/health",
+      "type": "string"
+     },
+     "image": {
+      "description": "Inference server image (vLLM, TGI, Triton, custom FastAPI).",
+      "type": "string"
+     },
+     "modelId": {
+      "default": "",
+      "type": "string"
+     },
+     "name": {
+      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
+      "type": "string"
+     },
+     "owner": {
+      "default": "platform-team",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "image"
+    ],
+    "title": "InferenceECS",
+    "type": "object"
+   }
+  },
+  "compute/inference-eks/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Model inference on EKS",
+   "displayNamePt": "Inference de modelo no EKS",
+   "goldenPath": "GP-B",
+   "id": "compute/inference-eks/v1",
+   "kind": "InferenceEKS",
+   "lifecycle": "available",
+   "outputs": [
+    "availableReplicas",
+    "endpoint",
+    "readyReplicas"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "Available",
+   "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "containerPort": {
+      "default": 8080,
+      "type": "integer"
+     },
+     "environment": {
+      "default": "dev",
+      "enum": [
+       "dev",
+       "lab",
+       "internal",
+       "demo",
+       "prod"
+      ],
+      "type": "string"
+     },
+     "healthPath": {
+      "default": "/health",
+      "type": "string"
+     },
+     "image": {
+      "description": "Inference server image (vLLM, TGI, Triton, custom FastAPI).",
+      "type": "string"
+     },
+     "modelId": {
+      "default": "",
+      "type": "string"
+     },
+     "name": {
+      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
+      "type": "string"
+     },
+     "owner": {
+      "default": "platform-team",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "image"
+    ],
+    "title": "InferenceEKS",
+    "type": "object"
+   }
+  },
+  "compute/lambda/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Lambda function",
+   "displayNamePt": "Função Lambda",
+   "goldenPath": "GP-I1",
+   "id": "compute/lambda/v1",
+   "kind": "LambdaFunction",
+   "lifecycle": "preview",
+   "outputs": [
+    "functionArn",
+    "functionName"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "environment": {
+      "default": "dev",
+      "type": "string"
+     },
+     "environmentVariables": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object"
+     },
+     "handler": {
+      "default": "main.lambda_handler",
+      "type": "string"
+     },
+     "name": {
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "type": "string"
+     },
+     "roleArn": {
+      "pattern": "^arn:aws:iam::",
+      "type": "string"
+     },
+     "runtime": {
+      "default": "python3.12",
+      "enum": [
+       "python3.12",
+       "python3.13",
+       "nodejs22.x"
+      ],
+      "type": "string"
+     },
+     "s3Bucket": {
+      "type": "string"
+     },
+     "s3Key": {
+      "type": "string"
+     },
+     "size": {
+      "default": "medium",
+      "description": "small=256MB medium=1024MB large=2048MB xlarge=4096MB",
+      "enum": [
+       "small",
+       "medium",
+       "large",
+       "xlarge"
+      ],
+      "type": "string"
+     },
+     "timeout": {
+      "default": 30,
+      "maximum": 900,
+      "minimum": 3,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "name",
+     "s3Bucket",
+     "s3Key",
+     "roleArn"
+    ],
+    "title": "LambdaFunction",
+    "type": "object"
+   }
+  },
+  "database/dynamodb/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "DynamoDB table",
+   "displayNamePt": "Tabela DynamoDB",
+   "goldenPath": "GP-I2",
+   "id": "database/dynamodb/v1",
+   "kind": "DynamoDBTable",
+   "lifecycle": "preview",
+   "outputs": [
+    "tableArn",
+    "tableName"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "environment": {
+      "default": "dev",
+      "type": "string"
+     },
+     "hashKeyName": {
+      "default": "id",
+      "type": "string"
+     },
+     "hashKeyType": {
+      "default": "N",
+      "enum": [
+       "S",
+       "N",
+       "B"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "DynamoDBTable",
+    "type": "object"
+   }
+  },
+  "entrypoint/http-api/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "HTTP API entrypoint",
+   "displayNamePt": "Entrypoint HTTP API",
+   "goldenPath": "GP-I7",
+   "id": "entrypoint/http-api/v1",
+   "kind": "WebAPI",
+   "lifecycle": "preview",
+   "outputs": [
+    "apiEndpoint",
+    "apiID"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "environment": {
+      "default": "dev",
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "targetFunctionArn": {
+      "pattern": "^arn:aws:lambda:",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "targetFunctionArn"
+    ],
+    "title": "WebAPI",
+    "type": "object"
+   }
+  },
+  "frontend/static-site/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Static site bucket",
+   "displayNamePt": "Bucket de site estático",
+   "goldenPath": "GP-A3",
+   "id": "frontend/static-site/v1",
+   "kind": "StaticSite",
+   "lifecycle": "preview",
+   "outputs": [
+    "bucketArn",
+    "bucketName"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "environment": {
+      "default": "dev",
+      "type": "string"
+     },
+     "name": {
+      "description": "Globally unique bucket name (include account suffix)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "StaticSite",
+    "type": "object"
+   }
+  },
+  "frontend/static-web-app/v1": {
+   "apiVersion": "kro.run/v1alpha1",
+   "argoApplication": "agent-platform-instances",
+   "cost": null,
+   "deletionPolicy": "retain",
+   "displayName": "Static web app (CloudFront + S3)",
+   "displayNamePt": "Web app estática (CloudFront + S3)",
+   "goldenPath": "GP-A",
+   "id": "frontend/static-web-app/v1",
+   "kind": "StaticWebApp",
+   "lifecycle": "available",
+   "outputs": [
+    "bucketArn",
+    "bucketName",
+    "distributionId",
+    "distributionStatus",
+    "domainName",
+    "url"
+   ],
+   "owner": "platform-team",
+   "readyCondition": "ACK.ResourceSynced",
+   "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "contentSecurityPolicy": {
+      "default": "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+      "type": "string"
+     },
+     "deletionPolicy": {
+      "default": "retain",
+      "description": "delete só com lifecycle ephemeral; imutável depois da criação",
+      "enum": [
+       "retain",
+       "delete"
+      ],
+      "type": "string"
+     },
+     "environment": {
+      "default": "dev",
+      "enum": [
+       "dev",
+       "lab",
+       "internal",
+       "demo",
+       "prod"
+      ],
+      "type": "string"
+     },
+     "expiresAt": {
+      "default": "",
+      "description": "ISO 8601 UTC; obrigatório quando lifecycle é ephemeral",
+      "type": "string"
+     },
+     "indexDocument": {
+      "default": "index.html",
+      "type": "string"
+     },
+     "lifecycle": {
+      "default": "persistent",
+      "description": "ephemeral só no espaço de nomes reservado (tour-*), com expiresAt; o reaper abre o MR de remoção ao vencer",
+      "enum": [
+       "persistent",
+       "ephemeral"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "description": "Global bucket name; include a unique suffix such as the account id.",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+      "type": "string"
+     },
+     "owner": {
+      "default": "platform-team",
+      "type": "string"
+     },
+     "priceClass": {
+      "default": "PriceClass_100",
+      "enum": [
+       "PriceClass_100",
+       "PriceClass_200",
+       "PriceClass_All"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "StaticWebApp",
+    "type": "object"
+   }
+  }
+ },
+ "excluded": {
+  "agent/conversational/v1": "agents are created through the Agent Builder",
+  "agent/sandbox/v1": "agents are created through the Agent Builder",
+  "agent/scheduled/v1": "agents are created through the Agent Builder",
+  "agent/service/v1": "agents are created through the Agent Builder",
+  "cache/redis/v1": "lifecycle is planned",
+  "database/postgres/v1": "lifecycle is planned",
+  "messaging/queue/v1": "lifecycle is planned",
+  "storage/bucket/v1": "lifecycle is planned"
+ },
+ "indexVersion": "platform-assistant-capabilities/v1",
+ "source": "platform/catalog"
+}

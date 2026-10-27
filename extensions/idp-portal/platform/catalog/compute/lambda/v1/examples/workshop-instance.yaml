@@ -1,0 +1,13 @@
+# Standalone example — requires an existing execution role and S3 package
+apiVersion: kro.run/v1alpha1
+kind: LambdaFunction
+metadata:
+  name: sample-function
+spec:
+  name: sample-function
+  s3Bucket: my-artifacts-bucket
+  s3Key: function-python-users-posts.zip
+  size: medium
+  roleArn: arn:aws:iam::111122223333:role/sample-lambda-role
+  environmentVariables:
+    LOG_LEVEL: INFO

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aws-samples/sample-platform-engineering-foundations/platform/agent-builder/agent-draft.schema.json",
+  "title": "AgentDraft v1",
+  "description": "Structured intent produced by the model or edited by the user. It is DATA, never a manifest. Only the server-side compiler turns it into a kagent Agent. Contract owner: docs/agent-platform/design-agent-builder.md. Semantic rules that JSON Schema cannot express (reserved fixture prefix for non-admins, tool catalog membership by file) are listed there and enforced by the stdlib validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "displayName", "description", "language", "instructions", "tools", "skills"],
+  "properties": {
+    "schemaVersion": {
+      "const": "agent-draft/v1"
+    },
+    "name": {
+      "description": "Kubernetes object name. Prefix ab- keeps builder agents disjoint from system agents in namespace kagent. Prefix ab-fx- is reserved for run-created fixtures (admin only).",
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 40,
+      "pattern": "^ab-[a-z0-9](?:[a-z0-9-]{0,35}[a-z0-9])?$"
+    },
+    "displayName": {
+      "$ref": "#/$defs/singleLine",
+      "minLength": 3,
+      "maxLength": 60
+    },
+    "description": {
+      "$ref": "#/$defs/singleLine",
+      "minLength": 20,
+      "maxLength": 240
+    },
+    "language": {
+      "description": "Language the created agent answers in.",
+      "enum": ["pt-BR", "en-US", "es"]
+    },
+    "instructions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/singleLine",
+        "minLength": 10,
+        "maxLength": 400
+      }
+    },
+    "tools": {
+      "description": "Subset of platform/agent-builder/tool-catalog.json. Empty means the agent answers only from the conversation.",
+      "type": "array",
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "k8s_get_resources",
+          "k8s_get_resource_yaml",
+          "k8s_describe_resource",
+          "k8s_get_events",
+          "k8s_get_pod_logs"
+        ]
+      }
+    },
+    "skills": {
+      "description": "A2A agent card skills.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "description", "examples"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+          },
+          "name": {
+            "$ref": "#/$defs/singleLine",
+            "minLength": 3,
+            "maxLength": 60
+          },
+          "description": {
+            "$ref": "#/$defs/singleLine",
+            "minLength": 10,
+            "maxLength": 200
+          },
+          "examples": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/$defs/singleLine",
+              "minLength": 5,
+              "maxLength": 200
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "singleLine": {
+      "description": "Free text on one line, no control characters, no leading or trailing whitespace, and nothing that looks like a credential.",
+      "type": "string",
+      "pattern": "^\\S(?:[^\\u0000-\\u001f\\u007f]*\\S)?$",
+      "not": {
+        "pattern": "(?:AKIA|ASIA)[0-9A-Z]{16}|-----BEGIN|glpat-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|xox[bp]-[0-9A-Za-z-]{20,}|eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}|(?:[Pp]assw(?:or)?d|PASSW(?:OR)?D|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)\\s*[:=]\\s*\\S"
+      }
+    }
+  }
+}

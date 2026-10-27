@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: redis
+  domain: cache
+  version: v1
+spec:
+  displayName: Application cache
+  displayNamePt: Cache de aplicação
+  description: Private cache capability with sizing profiles and network guardrails.
+  descriptionPt: Cache privado com perfis de tamanho e guardrails de rede.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK ElastiCache
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-I5
+  relations: {requires: [], composes: []}

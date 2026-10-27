@@ -1,0 +1,25 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: lambda
+  domain: compute
+  version: v1
+spec:
+  displayName: Lambda function
+  displayNamePt: Função Lambda
+  description: Governed Lambda function with least-privilege IAM and retained deletion.
+  descriptionPt: Função Lambda governada com IAM mínimo e deleção retida.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK Lambda/IAM
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/lambda-function-rgd.yaml
+  goldenPath: GP-I1
+  relations:
+    requires: []
+    composes: []
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

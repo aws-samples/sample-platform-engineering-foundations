@@ -1,0 +1,216 @@
+# Golden Path A: Static Web App no padrão AWS.
+# CloudFront (TLS, HTTP->HTTPS) + S3 privado (BPA total, sem website hosting) + Origin Access
+# Control (SigV4) + bucket policy que só aceita a distribution + security headers.
+# Hardening da conta: deletion-policy vinda do schema (default retain) + tag auto-delete=no em todo recurso.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: static-web-app
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: StaticWebApp
+    spec:
+      # Nome de bucket é global: inclua sufixo único (ex.: account ID)
+      name: string
+      environment: string | default="dev"
+      owner: string | default="platform-team"
+      indexDocument: string | default="index.html"
+      priceClass: string | default="PriceClass_100"
+      # CSP default fechada: só self. Ajuste por app quando houver CDN/fonts externos.
+      contentSecurityPolicy: string | default="default-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+      # Modo efêmero (docs/agent-platform/design-first-run.md). Os defaults reproduzem o
+      # comportamento anterior, então instâncias existentes não mudam. O validador só aceita
+      # "ephemeral" com nome reservado (tour-* / appmod-tour-*) e expiresAt, e nunca deixa uma
+      # instância existente trocar lifecycle ou deletionPolicy.
+      lifecycle: string | default="persistent"
+      deletionPolicy: string | default="retain"
+      expiresAt: string | default=""
+    status:
+      bucketName: ${bucket.spec.name}
+      bucketArn: ${bucket.status.ackResourceMetadata.arn}
+      distributionId: ${distribution.status.id}
+      domainName: ${distribution.status.domainName}
+      url: https://${distribution.status.domainName}
+      distributionStatus: ${distribution.status.status}
+
+  resources:
+    - id: bucket
+      readyWhen:
+        - ${bucket.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: s3.services.k8s.aws/v1alpha1
+        kind: Bucket
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: ${schema.spec.deletionPolicy}
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          publicAccessBlock:
+            blockPublicACLs: true
+            blockPublicPolicy: true
+            ignorePublicACLs: true
+            restrictPublicBuckets: true
+          ownershipControls:
+            rules:
+              - objectOwnership: BucketOwnerEnforced
+          encryption:
+            rules:
+              - applyServerSideEncryptionByDefault:
+                  sseAlgorithm: AES256
+                bucketKeyEnabled: true
+          versioning:
+            status: Enabled
+          # Só a distribution (via OAC) lê objetos. Referência CEL cria a dependência
+          # distribution -> bucket no grafo; a distribution aponta para o bucket só pelo
+          # domainName textual, então não há ciclo.
+          policy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Sid": "AllowCloudFrontOAC",
+                "Effect": "Allow",
+                "Principal": {"Service": "cloudfront.amazonaws.com"},
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::${schema.spec.name}/*",
+                "Condition": {"StringEquals": {"AWS:SourceArn": "${distribution.status.ackResourceMetadata.arn}"}}
+              }]
+            }
+          tagging:
+            tagSet:
+              - key: auto-delete
+                value: "no"
+              - key: Environment
+                value: ${schema.spec.environment}
+              - key: ManagedBy
+                value: KRO-ACK
+              - key: platform:capability
+                value: static-web-app
+              - key: platform:owner
+                value: ${schema.spec.owner}
+              # Lidas pelo mirror antes de esvaziar um bucket de tour (ADR-0007, emenda de 30/09).
+              - key: platform:lifecycle
+                value: ${schema.spec.lifecycle}
+              - key: platform:instance
+                value: ${schema.metadata.name}
+
+    - id: oac
+      readyWhen:
+        - ${oac.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: cloudfront.services.k8s.aws/v1alpha1
+        kind: OriginAccessControl
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: ${schema.spec.deletionPolicy}
+          name: ${schema.spec.name}-oac
+        spec:
+          originAccessControlConfig:
+            name: ${schema.spec.name}-oac
+            description: OAC for ${schema.spec.name} (platform static-web-app)
+            originAccessControlOriginType: s3
+            signingBehavior: always
+            signingProtocol: sigv4
+
+    - id: headers
+      readyWhen:
+        - ${headers.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: cloudfront.services.k8s.aws/v1alpha1
+        kind: ResponseHeadersPolicy
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: ${schema.spec.deletionPolicy}
+          name: ${schema.spec.name}-security-headers
+        spec:
+          responseHeadersPolicyConfig:
+            name: ${schema.spec.name}-security-headers
+            comment: Security headers for ${schema.spec.name}
+            securityHeadersConfig:
+              strictTransportSecurity:
+                accessControlMaxAgeSec: 63072000
+                includeSubdomains: true
+                preload: true
+                override: true
+              contentTypeOptions:
+                override: true
+              frameOptions:
+                frameOption: DENY
+                override: true
+              referrerPolicy:
+                referrerPolicy: strict-origin-when-cross-origin
+                override: true
+              contentSecurityPolicy:
+                contentSecurityPolicy: ${schema.spec.contentSecurityPolicy}
+                override: true
+
+    - id: distribution
+      readyWhen:
+        - ${distribution.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: cloudfront.services.k8s.aws/v1alpha1
+        kind: Distribution
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: ${schema.spec.deletionPolicy}
+          name: ${schema.spec.name}
+        spec:
+          distributionConfig:
+            comment: platform static-web-app ${schema.spec.name}
+            enabled: true
+            defaultRootObject: ${schema.spec.indexDocument}
+            priceClass: ${schema.spec.priceClass}
+            httpVersion: http2and3
+            isIPV6Enabled: true
+            origins:
+              items:
+                - id: s3-origin
+                  domainName: ${schema.spec.name}.s3.sa-east-1.amazonaws.com
+                  originAccessControlID: ${oac.status.id}
+                  s3OriginConfig:
+                    originAccessIdentity: ""
+                  # UpdateDistribution substitui a config inteira, e o CloudFront recusa a origem
+                  # sem CustomHeaders e sem OriginPath (IllegalUpdate, aws-controllers-k8s/community#2461).
+                  # O CRD do ACK não tem quantity (generator.yaml:38): o controlador manda
+                  # Quantity = len(items) só quando customHeaders existe (hooks.go:165-168).
+                  # items: [] vira Quantity 0; omitir quebra todo update. Contrato em
+                  # tests/test_static_web_app_origin_contract.py.
+                  customHeaders:
+                    items: []
+                  originPath: ""
+            defaultCacheBehavior:
+              targetOriginID: s3-origin
+              viewerProtocolPolicy: redirect-to-https
+              compress: true
+              # CachingOptimized (managed policy id)
+              cachePolicyID: 658327ea-f89d-4fab-a63d-7e88639e58f6
+              responseHeadersPolicyID: ${headers.status.id}
+              allowedMethods:
+                items: [GET, HEAD, OPTIONS]
+                cachedMethods:
+                  items: [GET, HEAD]
+            customErrorResponses:
+              items:
+                - errorCode: 403
+                  responseCode: "200"
+                  responsePagePath: /${schema.spec.indexDocument}
+                  errorCachingMinTTL: 10
+                - errorCode: 404
+                  responseCode: "200"
+                  responsePagePath: /${schema.spec.indexDocument}
+                  errorCachingMinTTL: 10
+            viewerCertificate:
+              cloudFrontDefaultCertificate: true
+              minimumProtocolVersion: TLSv1.2_2021
+          tags:
+            - key: auto-delete
+              value: "no"
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+            - key: platform:capability
+              value: static-web-app
+            - key: platform:owner
+              value: ${schema.spec.owner}

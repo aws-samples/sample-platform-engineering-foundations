@@ -1,0 +1,65 @@
+{
+  "$comment": "Single source of truth for backlog item cluster-metrics. Owned by the integrator (agent-pm). The cluster-api tests assert the Lambda produces these shapes; the Cluster Explorer tests use the examples below as the mocked responses. Neither worker edits this file. Derived on 2026-10-23 from the WIP in portal-appmod-wt-cluster-metrics (backend/cluster_api/lambda_function.py).",
+  "routes": {
+    "pods": {"method": "GET", "path": "/cluster/pod-metrics", "query": ["ns", "project"], "scoped": true, "collectionKey": "pods"},
+    "nodes": {"method": "GET", "path": "/cluster/node-metrics", "query": [], "scoped": false, "collectionKey": "nodes"}
+  },
+  "states": {
+    "available": {"http": 200, "collection": "array"},
+    "not_installed": {"http": 200, "collection": "null"},
+    "unavailable": {"http": 503, "collection": "null"},
+    "forbidden": {"http": 502, "collection": "null"},
+    "error": {"http": 502, "collection": "null"}
+  },
+  "rules": [
+    "metrics.status is always present and is one of the keys of states",
+    "the collection key is null whenever metrics.status is not available; it is never an empty list standing in for missing data",
+    "truncated is present only when metrics.status is available",
+    "error is a human-readable string present for unavailable, forbidden and error",
+    "cpuMillicores, memoryBytes, cpuPercent, memoryPercent and windowSeconds may be null when the sample is unreadable",
+    "stale is true when the sample timestamp is missing or older than 300 seconds",
+    "pod rows never carry labels or annotations"
+  ],
+  "examples": {
+    "pods_available": {
+      "http": 200,
+      "body": {
+        "metrics": {"status": "available", "reason": "", "apiVersion": "metrics.k8s.io/v1beta1"},
+        "namespace": "team-a",
+        "dropped": 0,
+        "readAt": 1792760400,
+        "truncated": false,
+        "pods": [
+          {"name": "hello-web-7d9c", "namespace": "team-a", "timestamp": "2026-10-23T12:59:40Z", "windowSeconds": 15.0, "stale": false,
+           "cpuMillicores": 12, "memoryBytes": 41943040,
+           "containers": [{"name": "web", "cpuMillicores": 12, "memoryBytes": 41943040}]}
+        ]
+      }
+    },
+    "pods_not_installed": {
+      "http": 200,
+      "body": {"metrics": {"status": "not_installed", "reason": "metrics_api_not_registered", "apiVersion": ""}, "namespace": "team-a", "dropped": 0, "readAt": 1792760400, "pods": null}
+    },
+    "pods_unavailable": {
+      "http": 503,
+      "body": {"metrics": {"status": "unavailable", "reason": "metrics_api_service_unavailable", "apiVersion": ""}, "namespace": "team-a", "dropped": 0, "readAt": 1792760400, "pods": null, "error": "metrics api is registered but not answering"}
+    },
+    "nodes_available": {
+      "http": 200,
+      "body": {
+        "metrics": {"status": "available", "reason": "", "apiVersion": "metrics.k8s.io/v1beta1"},
+        "allocatableReadable": true,
+        "readAt": 1792760400,
+        "truncated": false,
+        "nodes": [
+          {"name": "ip-10-0-1-23.sa-east-1.compute.internal", "timestamp": "2026-10-23T12:59:41Z", "windowSeconds": 20.0, "stale": false,
+           "cpuMillicores": 420, "memoryBytes": 2147483648, "cpuPercent": 22, "memoryPercent": 31}
+        ]
+      }
+    },
+    "nodes_forbidden": {
+      "http": 502,
+      "body": {"metrics": {"status": "forbidden", "reason": "http_403", "apiVersion": ""}, "allocatableReadable": false, "readAt": 1792760400, "nodes": null, "error": "the cluster refused the metrics read"}
+    }
+  }
+}

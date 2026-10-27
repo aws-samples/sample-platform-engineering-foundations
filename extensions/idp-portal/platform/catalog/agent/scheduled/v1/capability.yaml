@@ -1,0 +1,25 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: scheduled
+  domain: agent
+  version: v1
+spec:
+  displayName: Scheduled agent
+  displayNamePt: Agent agendado
+  description: Batch agent with schedule, retry, timeout, concurrency and run history.
+  descriptionPt: Agent batch com schedule, retry, timeout, concorrência e histórico.
+  owner: platform-team
+  engine: kro
+  pattern: kro + Argo CronWorkflow
+  lifecycle: available
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/scheduled-agent-rgd.yaml
+  goldenPath: GP-G1
+  relations:
+    requires: []
+    composes: []
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: InstanceSynced

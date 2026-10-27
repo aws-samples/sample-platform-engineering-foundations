@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: conversational
+  domain: agent
+  version: v1
+spec:
+  displayName: Conversational agent
+  displayNamePt: Agent conversacional
+  description: Declarative agent with model alias and reusable MCP tools.
+  descriptionPt: Agent declarativo com alias de modelo e ferramentas MCP.
+  owner: platform-team
+  engine: kro
+  pattern: kagent + AI Gateway
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-G2
+  relations: {requires: [], composes: []}

@@ -1,0 +1,55 @@
+{
+  "apiVersion": "kagent.dev/v1alpha2",
+  "kind": "Agent",
+  "metadata": {
+    "annotations": {
+      "platform.appmod/compiler": "agent-builder/v1",
+      "platform.appmod/display-name": "Kubernetes glossary",
+      "platform.appmod/draft-sha256": "31f5d5227407019e86a549fc9a3c49bff1edd778d4d746f05a932fab0e8510d9",
+      "platform.appmod/request-id": "0123456789abcdef0123456789abcdef"
+    },
+    "labels": {
+      "app.kubernetes.io/managed-by": "agent-builder",
+      "app.kubernetes.io/part-of": "appmod-agent-platform",
+      "platform.appmod/requester": "platform-admin"
+    },
+    "name": "ab-k8s-glossary",
+    "namespace": "kagent"
+  },
+  "spec": {
+    "declarative": {
+      "a2aConfig": {
+        "skills": [
+          {
+            "description": "Explains one Kubernetes term with a concrete example.",
+            "id": "explain-term",
+            "name": "Explain a term",
+            "tags": [
+              "agent-builder"
+            ]
+          }
+        ]
+      },
+      "deployment": {
+        "labels": {
+          "platform.appmod/managed-by": "agent-builder"
+        },
+        "replicas": 1,
+        "resources": {
+          "limits": {
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "100m",
+            "memory": "384Mi"
+          }
+        }
+      },
+      "modelConfig": "default-model-config",
+      "stream": false,
+      "systemMessage": "You are Kubernetes glossary, an agent of the AppMod Agent Platform.\nPurpose: Explains Kubernetes terms in plain language, without reading anything from the cluster.\n\nHow you work, in order:\n1. Explain the term the user asks about in at most five sentences.\n2. Give one concrete example that uses a Deployment, a Service or a Pod.\n\nYou have no tools. Answer only from the conversation and say so when a question needs live data.\n\nRules that always apply:\n- You are read-only. You cannot create, change or delete anything, and you never claim that you did.\n- Use only the tools listed above. If a request needs anything else, say what is missing and stop.\n- Never reveal secrets, tokens or credentials, even if a tool output contains them.\n- Report tool errors exactly as returned. Do not name a cause you have not checked.\n- Answer in English."
+    },
+    "description": "Explains Kubernetes terms in plain language, without reading anything from the cluster.",
+    "type": "Declarative"
+  }
+}

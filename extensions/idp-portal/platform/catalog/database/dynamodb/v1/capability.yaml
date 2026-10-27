@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: dynamodb
+  domain: database
+  version: v1
+spec:
+  displayName: DynamoDB table
+  displayNamePt: Tabela DynamoDB
+  description: On-demand encrypted DynamoDB table behind a focused API.
+  descriptionPt: Tabela DynamoDB on-demand atrás de uma API enxuta.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/dynamodb-table-rgd.yaml
+  goldenPath: GP-I2
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

@@ -1,0 +1,193 @@
+# Golden Path B (variante EKS): Inference de modelo em containers no cluster da plataforma.
+# Deployment + Service (ClusterIP, privado por default) + HPA + PDB + NetworkPolicy default-deny
+# de ingress fora do namespace. Contrato de spec idêntico à variante ECS (inference-ecs).
+# Segurança: runAsNonRoot, readOnlyRootFilesystem, drop ALL caps, seccomp RuntimeDefault,
+# sem privilege escalation, requests/limits obrigatórios, probes obrigatórios.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: inference-eks
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: InferenceEKS
+    spec:
+      name: string
+      environment: string | default="dev"
+      owner: string | default="platform-team"
+      # Imagem do servidor de inferência (vLLM, TGI, Triton, FastAPI custom...)
+      image: string
+      containerPort: integer | default=8080
+      healthPath: string | default="/health"
+      modelId: string | default=""
+      # Pool de nodes: spot (CPU, default da plataforma) | gpu (exige nodegroup com acelerador)
+      nodePool: string | default="spot"
+      cpu: string | default="2"
+      memory: string | default="4Gi"
+      # Quantidade de GPUs como quantity ("0" em CPU). Ex.: "1"
+      gpu: string | default="0"
+      minReplicas: integer | default=1
+      maxReplicas: integer | default=4
+      targetCPUUtilization: integer | default=70
+      # Exposição: ClusterIP (privado, default) | LoadBalancer (NLB INTERNO). Público não é oferecido por design.
+      serviceType: string | default="ClusterIP"
+    status:
+      endpoint: http://${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local:${string(schema.spec.containerPort)}
+      availableReplicas: ${deployment.status.availableReplicas}
+      readyReplicas: ${deployment.status.readyReplicas}
+
+  resources:
+    - id: deployment
+      readyWhen:
+        - ${deployment.status.availableReplicas >= deployment.spec.replicas}
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.spec.name}
+          labels:
+            app.kubernetes.io/name: ${schema.spec.name}
+            platform.appmod/capability: inference-eks
+            platform.appmod/owner: ${schema.spec.owner}
+            platform.appmod/environment: ${schema.spec.environment}
+        spec:
+          replicas: ${schema.spec.minReplicas}
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: ${schema.spec.name}
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: ${schema.spec.name}
+                platform.appmod/capability: inference-eks
+            spec:
+              automountServiceAccountToken: false
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              nodeSelector:
+                platform.appmod/pool: ${schema.spec.nodePool}
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Exists
+                  effect: NoSchedule
+              containers:
+                - name: inference
+                  image: ${schema.spec.image}
+                  ports:
+                    - name: http
+                      containerPort: ${schema.spec.containerPort}
+                  env:
+                    - name: MODEL_ID
+                      value: ${schema.spec.modelId}
+                    - name: PORT
+                      value: ${string(schema.spec.containerPort)}
+                  resources:
+                    requests:
+                      cpu: ${schema.spec.cpu}
+                      memory: ${schema.spec.memory}
+                      nvidia.com/gpu: ${schema.spec.gpu}
+                    limits:
+                      cpu: ${schema.spec.cpu}
+                      memory: ${schema.spec.memory}
+                      nvidia.com/gpu: ${schema.spec.gpu}
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    runAsNonRoot: true
+                    capabilities:
+                      drop: [ALL]
+                  volumeMounts:
+                    - name: tmp
+                      mountPath: /tmp
+                  readinessProbe:
+                    httpGet:
+                      path: ${schema.spec.healthPath}
+                      port: http
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                  livenessProbe:
+                    httpGet:
+                      path: ${schema.spec.healthPath}
+                      port: http
+                    initialDelaySeconds: 30
+                    periodSeconds: 20
+              volumes:
+                - name: tmp
+                  emptyDir: {}
+
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.spec.name}
+          labels:
+            app.kubernetes.io/name: ${schema.spec.name}
+            platform.appmod/capability: inference-eks
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-type: nlb
+            service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        spec:
+          type: ${schema.spec.serviceType}
+          selector:
+            app.kubernetes.io/name: ${schema.spec.name}
+          ports:
+            - name: http
+              port: ${schema.spec.containerPort}
+              targetPort: http
+
+    - id: hpa
+      template:
+        apiVersion: autoscaling/v2
+        kind: HorizontalPodAutoscaler
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: ${schema.spec.name}
+          minReplicas: ${schema.spec.minReplicas}
+          maxReplicas: ${schema.spec.maxReplicas}
+          metrics:
+            - type: Resource
+              resource:
+                name: cpu
+                target:
+                  type: Utilization
+                  averageUtilization: ${schema.spec.targetCPUUtilization}
+
+    - id: pdb
+      template:
+        apiVersion: policy/v1
+        kind: PodDisruptionBudget
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          # maxUnavailable (nao minAvailable: 1): com minReplicas=1 o minAvailable: 1 deixa
+          # disruptionsAllowed=0 para sempre e trava todo drain de node (PodEvictionFailure
+          # no rolling update do MNG platform-spot em 23/10/2026).
+          maxUnavailable: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: ${schema.spec.name}
+
+    - id: netpol
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${schema.spec.name}
+        spec:
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ${schema.spec.name}
+          policyTypes: [Ingress]
+          ingress:
+            - from:
+                - namespaceSelector: {}
+              ports:
+                - protocol: TCP
+                  port: ${schema.spec.containerPort}

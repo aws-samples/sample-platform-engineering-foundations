@@ -1,0 +1,22 @@
+{
+  "source": "https://raw.githubusercontent.com/aws-controllers-k8s/cloudfront-controller/v1.9.1/config/crd/bases/cloudfront.services.k8s.aws_distributions.yaml",
+  "sourceSha256": "83c1e14caeed980c759c4bbe304ee054b6bdfa8bf5e8d146b89a6f30d1140927",
+  "readAt": "2026-10-23",
+  "note": "Recorte do CRD Distribution do ACK CloudFront v1.9.1 (byte a byte igual à main em 2026-10-23). Path: spec.distributionConfig.origins.items[]. O customHeaders não tem quantity: generator.yaml:38 ignora o campo e hooks.go:165-168 calcula Quantity = len(items) só quando customHeaders não é nil.",
+  "originProperties": [
+    "connectionAttempts",
+    "connectionTimeout",
+    "customHeaders",
+    "customOriginConfig",
+    "domainName",
+    "id",
+    "originAccessControlID",
+    "originPath",
+    "originShield",
+    "responseCompletionTimeout",
+    "s3OriginConfig",
+    "vpcOriginConfig"
+  ],
+  "customHeadersProperties": ["items"],
+  "s3OriginConfigProperties": ["originAccessIdentity", "originReadTimeout"]
+}

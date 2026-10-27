@@ -1,0 +1,8 @@
+# Standalone example — bucket names are global, adjust the suffix
+apiVersion: kro.run/v1alpha1
+kind: StaticSite
+metadata:
+  name: sample-site
+spec:
+  name: sample-site-111122223333
+  environment: dev

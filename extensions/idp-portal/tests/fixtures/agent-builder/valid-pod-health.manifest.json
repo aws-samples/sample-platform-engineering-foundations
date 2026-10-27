@@ -1,0 +1,72 @@
+{
+  "apiVersion": "kagent.dev/v1alpha2",
+  "kind": "Agent",
+  "metadata": {
+    "annotations": {
+      "platform.appmod/compiler": "agent-builder/v1",
+      "platform.appmod/display-name": "Saúde dos pods",
+      "platform.appmod/draft-sha256": "aa24fe12997c3efcb91aa6fc2ea876ce72e425195c4a76ae75ece16f2ccd261d",
+      "platform.appmod/request-id": "0123456789abcdef0123456789abcdef"
+    },
+    "labels": {
+      "app.kubernetes.io/managed-by": "agent-builder",
+      "app.kubernetes.io/part-of": "appmod-agent-platform",
+      "platform.appmod/requester": "platform-admin"
+    },
+    "name": "ab-pod-health",
+    "namespace": "kagent"
+  },
+  "spec": {
+    "declarative": {
+      "a2aConfig": {
+        "skills": [
+          {
+            "description": "Encontra pods fora de Running e explica a causa provável.",
+            "examples": [
+              "Quais pods não estão rodando no namespace appmod?"
+            ],
+            "id": "pod-health",
+            "name": "Saúde dos pods",
+            "tags": [
+              "agent-builder"
+            ]
+          }
+        ]
+      },
+      "deployment": {
+        "labels": {
+          "platform.appmod/managed-by": "agent-builder"
+        },
+        "replicas": 1,
+        "resources": {
+          "limits": {
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "100m",
+            "memory": "384Mi"
+          }
+        }
+      },
+      "modelConfig": "default-model-config",
+      "stream": false,
+      "systemMessage": "You are Saúde dos pods, an agent of the AppMod Agent Platform.\nPurpose: Encontra pods fora de Running em um namespace e explica a causa provável de cada um.\n\nHow you work, in order:\n1. Pergunte o namespace quando ele não vier na mensagem.\n2. Liste os pods do namespace com k8s_get_resources e separe os que não estão em Running.\n3. Para cada pod separado, leia os eventos com k8s_get_events e resuma a causa provável em uma linha.\n\nTools you may use: k8s_get_resources, k8s_get_events\n\nRules that always apply:\n- You are read-only. You cannot create, change or delete anything, and you never claim that you did.\n- Use only the tools listed above. If a request needs anything else, say what is missing and stop.\n- Never reveal secrets, tokens or credentials, even if a tool output contains them.\n- Report tool errors exactly as returned. Do not name a cause you have not checked.\n- Answer in Brazilian Portuguese.",
+      "tools": [
+        {
+          "mcpServer": {
+            "apiGroup": "kagent.dev",
+            "kind": "RemoteMCPServer",
+            "name": "builder-readonly-tool-server",
+            "toolNames": [
+              "k8s_get_resources",
+              "k8s_get_events"
+            ]
+          },
+          "type": "McpServer"
+        }
+      ]
+    },
+    "description": "Encontra pods fora de Running em um namespace e explica a causa provável de cada um.",
+    "type": "Declarative"
+  }
+}

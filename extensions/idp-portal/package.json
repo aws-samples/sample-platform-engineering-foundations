@@ -1,0 +1,31 @@
+{
+  "name": "idp-portal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@cloudscape-design/board-components": "3.0.240",
+    "@cloudscape-design/components": "3.0.1404",
+    "@cloudscape-design/design-tokens": "3.0.116",
+    "@cloudscape-design/global-styles": "1.0.71",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "7.18.4",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "26.1.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vitest": "5.0.1"
+  }
+}

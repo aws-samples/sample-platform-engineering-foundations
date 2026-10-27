@@ -1,0 +1,28 @@
+{
+ "allowed": true,
+ "blocking": [],
+ "compensationSha256": "45d26797a8e93230eea573eee959731f335d8d58929a08e85120117dcd0b0577",
+ "order": [
+  "fn"
+ ],
+ "planId": "4c5c329f0c6f04f19c903ad99ea02c52",
+ "targets": [
+  {
+   "capability": "compute/lambda/v1",
+   "deletionPolicy": "retain",
+   "effect": "removes the platform object; the AWS resource is RETAINED (deletionPolicy retain)",
+   "kind": "LambdaFunction",
+   "name": "todo-fn",
+   "path": "platform/instances/todo-fn.yaml",
+   "ref": "fn",
+   "requestId": "5dcfeec9678016ca456f842d18558010"
+  }
+ ],
+ "untouched": [
+  {
+   "name": "todo-api",
+   "reason": "nothing was created (failed)",
+   "ref": "api"
+  }
+ ]
+}

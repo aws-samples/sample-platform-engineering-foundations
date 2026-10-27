@@ -1,0 +1,36 @@
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: smoke-sandbox
+  namespace: sandboxes
+  labels:
+    platform.appmod/owner: platform-team
+    app.kubernetes.io/part-of: appmod-agent-platform
+spec:
+  podTemplate:
+    spec:
+      containers:
+        - name: sandbox
+          image: public.ecr.aws/docker/library/alpine:3.24.3
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - trap 'exit 0' TERM INT; while true; do sleep 30; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

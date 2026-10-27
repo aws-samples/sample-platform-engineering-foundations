@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: service
+  domain: agent
+  version: v1
+spec:
+  displayName: Agent service
+  displayNamePt: Agent service
+  description: Long-running service with health probes, scaling and private routing.
+  descriptionPt: Serviço long-running com health probes, scaling e routing privado.
+  owner: platform-team
+  engine: kro
+  pattern: Deployment + Service
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-G4
+  relations: {requires: [], composes: []}

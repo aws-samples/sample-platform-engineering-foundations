@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: http-api
+  domain: entrypoint
+  version: v1
+spec:
+  displayName: HTTP API entrypoint
+  displayNamePt: Entrypoint HTTP API
+  description: API Gateway v2 (API, integration, route, stage) as one WebAPI kind.
+  descriptionPt: API Gateway v2 (API, integration, route, stage) como um único kind WebAPI.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/web-api-rgd.yaml
+  goldenPath: GP-I7
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

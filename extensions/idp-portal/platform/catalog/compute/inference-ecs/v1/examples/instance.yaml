@@ -1,0 +1,12 @@
+apiVersion: kro.run/v1alpha1
+kind: InferenceECS
+metadata:
+  name: demo-inference-ecs
+  namespace: appmod
+spec:
+  name: appmod-demo-inference-ecs
+  environment: lab
+  image: public.ecr.aws/nginx/nginx-unprivileged:stable-alpine
+  containerPort: 8080
+  healthPath: /
+  modelId: demo-echo

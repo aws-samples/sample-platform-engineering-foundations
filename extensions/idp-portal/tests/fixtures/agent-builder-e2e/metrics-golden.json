@@ -1,0 +1,38 @@
+{
+  "agent_builder_a2a_denied_total": {
+    "reason_code=agent_disabled": 1
+  },
+  "agent_builder_a2a_duration_ms": {
+    "count": 1,
+    "max": 6400,
+    "min": 6400,
+    "sum": 6400
+  },
+  "agent_builder_a2a_tests_total": {
+    "state=completed": 1,
+    "state=submitted": 1
+  },
+  "agent_builder_drafts_total": {
+    "outcome=ok": 1,
+    "outcome=timeout": 1
+  },
+  "agent_builder_phase_total": {
+    "phase=DISABLED,cause=NONE": 1,
+    "phase=READY,cause=NONE": 1,
+    "phase=STARTING,cause=IMAGE_PULL": 1
+  },
+  "agent_builder_request_failures_total": {
+    "reason_code=already_exists": 1,
+    "reason_code=limit_active_per_requester": 1
+  },
+  "agent_builder_requests_total": {
+    "op=create": 1,
+    "op=disable": 1
+  },
+  "agent_builder_time_to_ready_seconds": {
+    "count": 1,
+    "max": 300,
+    "min": 300,
+    "sum": 300
+  }
+}

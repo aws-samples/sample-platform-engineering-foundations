@@ -1,0 +1,10 @@
+//<html><head><meta name="robots" content="noindex"><style type="text/css">body { display: none; };</style><script>
+        setTimeout(function() {
+            const currentUrl = new URL(window.location.href);
+            let targetUrl = currentUrl.origin + currentUrl.pathname + currentUrl.search;
+            if (!window.location.port) {
+              targetUrl = targetUrl.replace(/^http:/, 'https:');
+            }
+            window.location = 'https://portal.example.com/_login?targetUrlBase64=' + encodeURIComponent(btoa(targetUrl)) + window.location.hash;
+        }, 1);
+        //</script><script>const $body = document.querySelector("body"); $body.innerHTML = '<div style="text-align: center; margin-top: 20%; font-family:Amazon Ember,Helvetica Neue,Roboto,Arial,sans-serif">Hang on, we&apos;ve got some formalities to take care of first...</div>'; </script></head><body></body></html>

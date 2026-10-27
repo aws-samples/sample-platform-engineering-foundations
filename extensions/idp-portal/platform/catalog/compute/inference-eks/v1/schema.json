@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InferenceEKS",
+  "type": "object",
+  "required": ["name", "image"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"},
+    "environment": {"type": "string", "enum": ["dev", "lab", "internal", "demo", "prod"], "default": "dev"},
+    "owner": {"type": "string", "default": "platform-team"},
+    "image": {"type": "string", "description": "Inference server image (vLLM, TGI, Triton, custom FastAPI)."},
+    "containerPort": {"type": "integer", "default": 8080},
+    "healthPath": {"type": "string", "default": "/health"},
+    "modelId": {"type": "string", "default": ""}
+  }
+}

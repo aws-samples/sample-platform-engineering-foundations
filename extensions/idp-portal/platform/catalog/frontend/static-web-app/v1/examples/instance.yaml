@@ -1,0 +1,9 @@
+apiVersion: kro.run/v1alpha1
+kind: StaticWebApp
+metadata:
+  name: hello-webapp
+  namespace: appmod
+spec:
+  name: appmod-hello-webapp-111122223333
+  environment: lab
+  owner: platform-team

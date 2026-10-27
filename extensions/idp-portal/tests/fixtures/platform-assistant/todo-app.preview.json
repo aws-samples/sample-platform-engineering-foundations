@@ -1,0 +1,198 @@
+{
+ "compiler": "platform-assistant/v1",
+ "errors": [],
+ "executor": {
+  "executedBy": {
+   "identity": "platform-assistant",
+   "persona": "Catalog Agent",
+   "type": "agent"
+  },
+  "requestedBy": {
+   "alias": "platform-admin",
+   "channel": "portal",
+   "persona": "Application Engineer",
+   "type": "human"
+  },
+  "writePath": "provision request -> GitLab CI merge request -> Argo CD -> kro/ACK"
+ },
+ "namespace": "appmod",
+ "plan": {
+  "items": [
+   {
+    "capability": "compute/lambda/v1",
+    "dependsOn": [],
+    "inputs": {
+     "environment": "dev",
+     "environmentVariables": {
+      "APP": "todo"
+     },
+     "handler": "main.lambda_handler",
+     "name": "todo-fn",
+     "roleArn": "arn:aws:iam::111122223333:role/todo-fn",
+     "runtime": "python3.12",
+     "s3Bucket": "appmod-artifacts-111122223333",
+     "s3Key": "todo-app/fn.zip",
+     "size": "medium",
+     "timeout": 30
+    },
+    "name": "todo-fn",
+    "ref": "fn"
+   },
+   {
+    "capability": "entrypoint/http-api/v1",
+    "dependsOn": [
+     "fn"
+    ],
+    "inputs": {
+     "environment": "dev",
+     "name": "todo-api",
+     "targetFunctionArn": {
+      "fromRef": "fn",
+      "output": "functionArn"
+     }
+    },
+    "name": "todo-api",
+    "ref": "api"
+   }
+  ],
+  "schemaVersion": "provision-plan/v1",
+  "summary": "Function and HTTP API for the todo-app"
+ },
+ "planSha256": "ac6881a586aa7e862698b966717ababbf9b57f918c7a316278a20fee71092317",
+ "project": "todo-app",
+ "secrets": "never shown here: use the authorized retrieval of each capability",
+ "steps": [
+  {
+   "capability": "compute/lambda/v1",
+   "change": "create",
+   "cost": null,
+   "defaults": [
+    {
+     "basis": "item name",
+     "field": "name",
+     "value": "todo-fn"
+    },
+    {
+     "basis": "schema default",
+     "field": "environment",
+     "value": "dev"
+    },
+    {
+     "basis": "schema default",
+     "field": "handler",
+     "value": "main.lambda_handler"
+    },
+    {
+     "basis": "schema default",
+     "field": "runtime",
+     "value": "python3.12"
+    },
+    {
+     "basis": "schema default",
+     "field": "size",
+     "value": "medium"
+    },
+    {
+     "basis": "schema default",
+     "field": "timeout",
+     "value": 30
+    }
+   ],
+   "deletionPolicy": "retain",
+   "dependsOn": [],
+   "displayName": "Lambda function",
+   "displayNamePt": "Função Lambda",
+   "inputs": {
+    "environment": "dev",
+    "environmentVariables": {
+     "APP": "todo"
+    },
+    "handler": "main.lambda_handler",
+    "name": "todo-fn",
+    "roleArn": "arn:aws:iam::111122223333:role/todo-fn",
+    "runtime": "python3.12",
+    "s3Bucket": "appmod-artifacts-111122223333",
+    "s3Key": "todo-app/fn.zip",
+    "size": "medium",
+    "timeout": 30
+   },
+   "kind": "LambdaFunction",
+   "lifecycle": "preview",
+   "manifest": "apiVersion: kro.run/v1alpha1\nkind: LambdaFunction\nmetadata:\n  name: todo-fn\n  namespace: appmod\n  labels:\n    platform.appmod/managed-by: \"platform-assistant\"\n    platform.appmod/owner: \"platform-admin\"\n    platform.appmod/plan-id: \"preview\"\n    platform.appmod/plan-step: \"fn\"\n    platform.appmod/project: \"todo-app\"\n    platform.appmod/requester: \"platform-admin\"\nspec:\n  \"environment\": \"dev\"\n  \"environmentVariables\":\n    \"APP\": \"todo\"\n  \"handler\": \"main.lambda_handler\"\n  \"name\": \"todo-fn\"\n  \"roleArn\": \"arn:aws:iam::111122223333:role/todo-fn\"\n  \"runtime\": \"python3.12\"\n  \"s3Bucket\": \"appmod-artifacts-111122223333\"\n  \"s3Key\": \"todo-app/fn.zip\"\n  \"size\": \"medium\"\n  \"timeout\": 30\n",
+   "name": "todo-fn",
+   "order": 1,
+   "outputs": [
+    "functionArn",
+    "functionName"
+   ],
+   "path": "platform/instances/todo-fn.yaml",
+   "readyCondition": "ACK.ResourceSynced",
+   "ref": "fn",
+   "references": []
+  },
+  {
+   "capability": "entrypoint/http-api/v1",
+   "change": "create",
+   "cost": null,
+   "defaults": [
+    {
+     "basis": "item name",
+     "field": "name",
+     "value": "todo-api"
+    },
+    {
+     "basis": "schema default",
+     "field": "environment",
+     "value": "dev"
+    }
+   ],
+   "deletionPolicy": "retain",
+   "dependsOn": [
+    "fn"
+   ],
+   "displayName": "HTTP API entrypoint",
+   "displayNamePt": "Entrypoint HTTP API",
+   "inputs": {
+    "environment": "dev",
+    "name": "todo-api",
+    "targetFunctionArn": {
+     "fromRef": "fn",
+     "output": "functionArn"
+    }
+   },
+   "kind": "WebAPI",
+   "lifecycle": "preview",
+   "manifest": "apiVersion: kro.run/v1alpha1\nkind: WebAPI\nmetadata:\n  name: todo-api\n  namespace: appmod\n  labels:\n    platform.appmod/managed-by: \"platform-assistant\"\n    platform.appmod/owner: \"platform-admin\"\n    platform.appmod/plan-id: \"preview\"\n    platform.appmod/plan-step: \"api\"\n    platform.appmod/project: \"todo-app\"\n    platform.appmod/requester: \"platform-admin\"\nspec:\n  \"environment\": \"dev\"\n  \"name\": \"todo-api\"\n  \"targetFunctionArn\": \"<resolved after fn is Ready: functionArn>\"\n",
+   "name": "todo-api",
+   "order": 2,
+   "outputs": [
+    "apiEndpoint",
+    "apiID"
+   ],
+   "path": "platform/instances/todo-api.yaml",
+   "readyCondition": "ACK.ResourceSynced",
+   "ref": "api",
+   "references": [
+    {
+     "field": "targetFunctionArn",
+     "fromRef": "fn",
+     "output": "functionArn"
+    }
+   ]
+  }
+ ],
+ "summary": "Function and HTTP API for the todo-app",
+ "valid": true,
+ "warnings": [
+  {
+   "code": "capability_preview",
+   "message": "compute/lambda/v1 is in preview",
+   "path": "/items/1/capability"
+  },
+  {
+   "code": "capability_preview",
+   "message": "entrypoint/http-api/v1 is in preview",
+   "path": "/items/0/capability"
+  }
+ ]
+}

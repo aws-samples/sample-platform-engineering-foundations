@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: queue
+  domain: messaging
+  version: v1
+spec:
+  displayName: Message queue
+  displayNamePt: Fila de mensagens
+  description: Encrypted queue with DLQ, retention and workload identity permissions.
+  descriptionPt: Fila criptografada com DLQ, retenção e permissões por identidade.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK SQS
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-I6
+  relations: {requires: [], composes: []}

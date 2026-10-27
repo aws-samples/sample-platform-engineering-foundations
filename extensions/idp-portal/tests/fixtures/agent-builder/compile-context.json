@@ -1,0 +1,6 @@
+{
+  "description": "Inputs the compiler receives besides the draft. In production requester comes from the the internal gateway session alias and requestId from platform-api, never from the draft.",
+  "requester": "platform-admin",
+  "requestId": "0123456789abcdef0123456789abcdef",
+  "previewRequestId": "preview"
+}

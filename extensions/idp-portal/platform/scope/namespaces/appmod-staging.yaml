@@ -1,0 +1,12 @@
+# Namespace do projeto agent-platform-staging (environments-promotion, 26/10/2026). Aplicado por quem
+# opera o cluster, como platform/cluster-api/cluster-rbac.yaml: a Application agent-platform-instances só
+# cria o namespace de DESTINO dela (appmod); um manifest promovido com metadata.namespace appmod-staging
+# precisa do namespace existente. Labels espelham o registry para o namespace se explicar sozinho.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: appmod-staging
+  labels:
+    platform.appmod/project: agent-platform-staging
+    platform.appmod/environment: staging
+    platform.appmod/owner: platform-team

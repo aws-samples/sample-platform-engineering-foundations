@@ -1,0 +1,74 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: scheduled-agent
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: ScheduledAgent
+    spec:
+      agentName: string
+      image: string | default="public.ecr.aws/docker/library/alpine:3.24.3"
+      schedule: string | default="0 10 * * 1"
+      message: string | default="AGENT_RUN_OK"
+      suspend: boolean | default=true
+    status:
+      serviceAccount: ${serviceAccount.metadata.name}
+      cronWorkflow: ${cronWorkflow.metadata.name}
+
+  resources:
+    - id: serviceAccount
+      template:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: ${schema.spec.agentName}
+          labels:
+            app.kubernetes.io/name: ${schema.spec.agentName}
+            app.kubernetes.io/part-of: appmod-agent-platform
+
+    - id: cronWorkflow
+      template:
+        apiVersion: argoproj.io/v1alpha1
+        kind: CronWorkflow
+        metadata:
+          name: ${schema.spec.agentName}
+          labels:
+            app.kubernetes.io/name: ${schema.spec.agentName}
+            app.kubernetes.io/part-of: appmod-agent-platform
+        spec:
+          schedules:
+            - ${schema.spec.schedule}
+          timezone: America/Sao_Paulo
+          concurrencyPolicy: Forbid
+          suspend: ${schema.spec.suspend}
+          startingDeadlineSeconds: 300
+          workflowSpec:
+            serviceAccountName: ${serviceAccount.metadata.name}
+            entrypoint: run
+            activeDeadlineSeconds: 1800
+            retryStrategy:
+              limit: "2"
+              retryPolicy: OnError
+              backoff:
+                duration: 5s
+                factor: "3"
+                maxDuration: 45s
+            ttlStrategy:
+              secondsAfterCompletion: 86400
+            templates:
+              - name: run
+                container:
+                  image: ${schema.spec.image}
+                  command:
+                    - /bin/sh
+                    - -c
+                  args:
+                    - printf '%s\\n' '${schema.spec.message}'
+                  resources:
+                    requests:
+                      cpu: 10m
+                      memory: 16Mi
+                    limits:
+                      cpu: 250m
+                      memory: 128Mi

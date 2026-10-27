@@ -1,0 +1,73 @@
+{
+  "$comment": "Scorecard standards (backlog scorecards-standards). The portal never invents a rule: every rule here is evaluated server-side by the cluster-api from the LIVE object, and the levels are attained bottom-up (gold requires every silver and bronze rule too). `check` is a fixed vocabulary the server implements; an unknown check makes the whole file invalid and scorecards come back as a named error, never as a pass. JSON rather than YAML because the Lambda ships no YAML parser and the other Git-owned inputs it reads (tool_catalog.json, registry.json) are JSON. Edit via MR: validate-platform.py lints this file.",
+  "version": 1,
+  "levels": ["bronze", "silver", "gold"],
+  "rules": [
+    {
+      "id": "ready",
+      "level": "bronze",
+      "check": "ready",
+      "title": "Resource is Ready",
+      "titlePt": "Recurso está Ready",
+      "description": "The declared readiness condition is True. A resource that never converged is not usable by anyone.",
+      "descriptionPt": "A condição de prontidão declarada está True. Recurso que nunca convergiu não serve a ninguém."
+    },
+    {
+      "id": "owner-declared",
+      "level": "bronze",
+      "check": "owner",
+      "title": "Owner declared",
+      "titlePt": "Owner declarado",
+      "description": "Label platform.appmod/owner or spec.owner names a team or alias. Without it nobody is paged and nobody can approve a change.",
+      "descriptionPt": "Label platform.appmod/owner ou spec.owner nomeia um time ou alias. Sem isso ninguém é acionado e ninguém aprova mudança."
+    },
+    {
+      "id": "gitops-tracked",
+      "level": "silver",
+      "check": "gitops-tracked",
+      "title": "Managed by GitOps",
+      "titlePt": "Gerido por GitOps",
+      "description": "Argo CD tracks the object (tracking annotation, instance label or the Application resource list). An object created by hand drifts from Git.",
+      "descriptionPt": "O Argo CD rastreia o objeto (annotation de tracking, label de instância ou a lista de recursos da Application). Objeto criado à mão deriva do Git."
+    },
+    {
+      "id": "status-current",
+      "level": "silver",
+      "check": "status-current",
+      "title": "Status reflects the spec",
+      "titlePt": "Status reflete o spec",
+      "description": "status.observedGeneration equals metadata.generation. A lagging status means the last change was not reconciled yet or the controller is stuck.",
+      "descriptionPt": "status.observedGeneration é igual a metadata.generation. Status atrasado significa que a última mudança ainda não foi reconciliada ou o controller travou."
+    },
+    {
+      "id": "environment-declared",
+      "level": "silver",
+      "check": "spec-field",
+      "path": "environment",
+      "engines": ["kro"],
+      "title": "Environment declared",
+      "titlePt": "Environment declarado",
+      "description": "spec.environment is set (lab, dev, prod). The compositions use it for naming and tagging the AWS resources they create.",
+      "descriptionPt": "spec.environment está preenchido (lab, dev, prod). As compositions usam o valor para nomear e etiquetar os recursos AWS que criam."
+    },
+    {
+      "id": "provenance",
+      "level": "gold",
+      "check": "provenance",
+      "title": "Request provenance recorded",
+      "titlePt": "Proveniência do pedido registrada",
+      "description": "The object carries who asked for it and through which path: platform.appmod/request-id or platform.appmod/mr-url annotation, or platform.appmod/plan-id or platform.appmod/requester label. Hand-written manifests have none.",
+      "descriptionPt": "O objeto carrega quem pediu e por qual caminho: annotation platform.appmod/request-id ou platform.appmod/mr-url, ou label platform.appmod/plan-id ou platform.appmod/requester. Manifest escrito à mão não tem nenhum."
+    },
+    {
+      "id": "project-labelled",
+      "level": "gold",
+      "check": "label",
+      "key": "platform.appmod/project",
+      "title": "Project label for cost allocation",
+      "titlePt": "Label de projeto para alocação de custo",
+      "description": "Label platform.appmod/project names the owning project, so cost and inventory can be grouped without relying on the namespace alone.",
+      "descriptionPt": "Label platform.appmod/project nomeia o projeto dono, para custo e inventário agruparem sem depender só do namespace."
+    }
+  ]
+}

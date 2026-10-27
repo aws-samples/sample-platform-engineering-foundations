@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: postgres
+  domain: database
+  version: v1
+spec:
+  displayName: PostgreSQL database
+  displayNamePt: Banco PostgreSQL
+  description: Encrypted relational database with backup and Retain deletion policy.
+  descriptionPt: Banco relacional criptografado, com backup e deletion policy Retain.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK RDS
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-I3
+  relations: {requires: [], composes: []}

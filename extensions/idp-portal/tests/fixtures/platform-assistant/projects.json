@@ -1,0 +1,4 @@
+{
+  "todo-app": {"namespace": "appmod", "members": {"platform-admin": "developer", "owner1": "owner", "viewer1": "viewer"}},
+  "other-app": {"namespace": "other", "members": {"stranger": "developer"}}
+}

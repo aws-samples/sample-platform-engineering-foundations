@@ -1,0 +1,13 @@
+/* Platform Assistant. Monospace manifest preview; a leading "+" marks every added line, so the
+   diff never depends on color alone. */
+.pa-manifest {
+  font-family: Monaco, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 4px solid #037f0c;
+  background: #f2f8f0;
+}

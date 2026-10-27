@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: static-site
+  domain: frontend
+  version: v1
+spec:
+  displayName: Static site bucket
+  displayNamePt: Bucket de site estático
+  description: S3 bucket with Public Access Block enforced by default.
+  descriptionPt: Bucket S3 com Public Access Block imposto por default.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/static-site-rgd.yaml
+  goldenPath: GP-A3
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

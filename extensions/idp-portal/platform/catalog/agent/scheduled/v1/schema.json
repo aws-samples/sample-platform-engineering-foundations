@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScheduledAgent",
+  "type": "object",
+  "required": ["agentName"],
+  "properties": {
+    "agentName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 40,
+      "description": "DNS-safe agent name"
+    },
+    "image": {
+      "type": "string",
+      "default": "public.ecr.aws/docker/library/alpine:3.24.3",
+      "not": {"pattern": ":latest$"}
+    },
+    "schedule": {
+      "type": "string",
+      "default": "0 10 * * 1",
+      "description": "Cron schedule, America/Sao_Paulo"
+    },
+    "message": {"type": "string", "default": "AGENT_RUN_OK", "maxLength": 200},
+    "suspend": {"type": "boolean", "default": true}
+  },
+  "additionalProperties": false
+}

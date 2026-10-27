@@ -1,0 +1,15 @@
+apiVersion: kro.run/v1alpha1
+kind: StaticWebApp
+metadata:
+  name: tour-teammate
+  namespace: appmod
+  labels:
+    platform.appmod/owner: teammate
+    platform.appmod/tour: "true"
+spec:
+  name: appmod-tour-teammate-111122223333
+  environment: lab
+  owner: teammate
+  lifecycle: ephemeral
+  deletionPolicy: delete
+  expiresAt: "2026-09-22T14:13:20Z"

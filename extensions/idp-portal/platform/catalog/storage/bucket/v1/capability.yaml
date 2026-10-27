@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: bucket
+  domain: storage
+  version: v1
+spec:
+  displayName: Object storage
+  displayNamePt: Object storage
+  description: Private encrypted bucket with Public Access Block and ownership labels.
+  descriptionPt: Bucket privado e criptografado, com Public Access Block e labels.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK S3
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-I4
+  relations: {requires: [], composes: []}

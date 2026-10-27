@@ -1,0 +1,1344 @@
+{
+  "fixtureVersion": "agent-builder-runtime-policy/v1",
+  "description": "Casos de admission do Agent Builder. Cada caso parte de um golden do contrato (tests/fixtures/agent-builder/) e aplica UM defeito, para que a negativa aponte uma causa só. O runner mescla 'patch' e remove os caminhos de 'remove', e depois faz kubectl apply --dry-run=server: a ValidatingAdmissionPolicy roda e nada é persistido.",
+  "policy": "platform/kagent/builder-admission-policy.yaml",
+  "allow": [
+    {
+      "id": "golden-pod-health",
+      "base": "valid-pod-health.manifest.json",
+      "why": "O golden do contrato passa como está. Se este caso falhar, a policy está mais apertada que o compiler."
+    },
+    {
+      "id": "golden-no-tools",
+      "base": "valid-no-tools.manifest.json",
+      "why": "Agent sem tools: a chave spec.declarative.tools é omitida inteira."
+    },
+    {
+      "id": "golden-disabled",
+      "base": "valid-pod-health.disabled.manifest.json",
+      "why": "Rollback L2: replicas 0 e label de estado desativado."
+    },
+    {
+      "id": "fixture-named-agent",
+      "base": "valid-pod-health.manifest.json",
+      "patch": {
+        "metadata": {
+          "name": "ab-fx-w7run1",
+          "labels": {
+            "platform.appmod/fixture": "true"
+          }
+        }
+      },
+      "why": "Fixture legítima: prefixo ab-fx- e label de fixture juntos."
+    },
+    {
+      "id": "non-builder-agent-untouched",
+      "base": "valid-pod-health.manifest.json",
+      "patch": {
+        "metadata": {
+          "name": "k8s-agent-lookalike"
+        }
+      },
+      "remove": [
+        [
+          "metadata",
+          "labels",
+          "app.kubernetes.io/managed-by"
+        ]
+      ],
+      "why": "CONTROLE DE ESCOPO. Sem o prefixo ab- e sem o label de managed-by, a matchCondition não casa e a policy não opina. Prova que o guarda-corpo não quebra os agents que já existem em kagent. Se este caso for negado, a policy está capturando objeto de terceiro."
+    }
+  ],
+  "deny": [
+    {
+      "id": "type-byo",
+      "patch": {
+        "spec": {
+          "type": "BYO"
+        }
+      },
+      "expectMessage": "declarative must be specified if type is Declarative",
+      "why": "BYO troca o runtime declarativo por imagem do usuario. Negado pela XValidation do proprio CRD, que exige (type==Declarative && has(declarative)) || (type==BYO && has(byo)); a policy tambem nega, mas o schema roda antes. Dois pontos de imposicao independentes.",
+      "expectLayer": "schema"
+    },
+    {
+      "id": "spec-byo-block",
+      "patch": {
+        "spec": {
+          "byo": {
+            "deployment": {
+              "image": "attacker/img:latest"
+            }
+          }
+        }
+      },
+      "expectMessage": "spec.byo is forbidden",
+      "why": "Imagem arbitrária pelo bloco byo."
+    },
+    {
+      "id": "spec-sandbox",
+      "patch": {
+        "spec": {
+          "sandbox": {
+            "network": {
+              "allowedDomains": [
+                "*.example.invalid"
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "spec.sandbox is forbidden",
+      "why": "Sandbox está fora do escopo da v1."
+    },
+    {
+      "id": "spec-allowed-namespaces",
+      "patch": {
+        "spec": {
+          "allowedNamespaces": {
+            "from": "All"
+          }
+        }
+      },
+      "expectMessage": "spec.allowedNamespaces is forbidden",
+      "why": "Amplia o alcance do agent para outros namespaces."
+    },
+    {
+      "id": "spec-git-skills",
+      "patch": {
+        "spec": {
+          "skills": {
+            "gitRefs": [
+              {
+                "url": "https://example.invalid/repo.git"
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "spec.skills (git references) is forbidden",
+      "why": "Carrega código de fora do repositório governado."
+    },
+    {
+      "id": "declarative-memory",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "memory": {
+              "modelConfig": "default-model-config"
+            }
+          }
+        }
+      },
+      "expectMessage": ".context and .memory are forbidden",
+      "why": "Memory é estado novo fora do contrato."
+    },
+    {
+      "id": "declarative-execute-code-blocks",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "executeCodeBlocks": true
+          }
+        }
+      },
+      "expectMessage": "executeCodeBlocks",
+      "why": "Execução de código no agent: o caminho mais curto de leitura para RCE."
+    },
+    {
+      "id": "declarative-prompt-template",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "promptTemplate": {
+              "dataSources": [
+                {
+                  "name": "prompt-overrides"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "promptTemplate",
+      "why": "promptTemplate liga processamento de Go template no systemMessage e habilita include() de chaves de ConfigMap. O prompt deixa de ser o que o compiler escreveu e passa a depender de um ConfigMap que nao passa por MR."
+    },
+    {
+      "id": "declarative-system-message-from",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "systemMessageFrom": {
+              "key": "OPENAI_API_KEY",
+              "name": "kagent-aiplat",
+              "type": "Secret"
+            }
+          }
+        }
+      },
+      "expectMessage": "systemMessage is required",
+      "why": "systemMessageFrom aceita type Secret, medido no CRD 0.9.9: le um Secret para dentro do system prompt. O ataque esta bloqueado DUAS vezes e por isso a mensagem observada e a da primeira regra: o CRD trata systemMessage e systemMessageFrom como mutuamente exclusivos, logo usar systemMessageFrom obriga a remover systemMessage, e a remocao ja cai na regra que exige systemMessage. A regra especifica de systemMessageFrom segue valendo como segunda camada, e a rodada de mutacao prova que ela nega sozinha quando a primeira sai.",
+      "remove": [
+        [
+          "spec",
+          "declarative",
+          "systemMessage"
+        ]
+      ]
+    },
+    {
+      "id": "declarative-context",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "context": {
+              "compaction": {}
+            }
+          }
+        }
+      },
+      "expectMessage": ".context and .memory are forbidden",
+      "why": "Contexto externo não revisado."
+    },
+    {
+      "id": "model-config-swap",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "modelConfig": "attacker-model-config"
+          }
+        }
+      },
+      "expectMessage": "modelConfig must be default-model-config",
+      "why": "ModelConfig próprio aponta para outro provider e outra credencial."
+    },
+    {
+      "id": "deployment-service-account-name",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "serviceAccountName": "kagent-controller"
+            }
+          }
+        }
+      },
+      "expectMessage": "serviceAccountName",
+      "why": "ServiceAccount arbitrária: herda o RBAC de quem ela quiser, inclusive o do controller."
+    },
+    {
+      "id": "deployment-service-account-config",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "serviceAccountConfig": {
+                "annotations": {
+                  "eks.amazonaws.com/role-arn": "arn:aws:iam::111122223333:role/admin"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "serviceAccountConfig",
+      "why": "Annotation de IRSA transforma o pod em uma role da AWS."
+    },
+    {
+      "id": "deployment-extra-containers",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "extraContainers": [
+                {
+                  "name": "side",
+                  "image": "alpine:3"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "extraContainers",
+      "why": "Container BYO ao lado do runtime declarativo."
+    },
+    {
+      "id": "deployment-image-registry",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "imageRegistry": "attacker.example.invalid"
+            }
+          }
+        }
+      },
+      "expectMessage": "imageRegistry",
+      "why": "Troca o registry de onde a imagem do agent vem."
+    },
+    {
+      "id": "deployment-image-pull-secrets",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "imagePullSecrets": [
+                {
+                  "name": "kagent-aiplat"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "imagePullSecrets",
+      "why": "Referencia Secret existente do namespace."
+    },
+    {
+      "id": "deployment-volumes",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "volumes": [
+                {
+                  "name": "host",
+                  "hostPath": {
+                    "path": "/"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "volumes",
+      "why": "hostPath na raiz do node."
+    },
+    {
+      "id": "deployment-volume-mounts",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "volumeMounts": [
+                {
+                  "name": "host",
+                  "mountPath": "/host"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "volumeMounts",
+      "why": "Monta volume no container do agent."
+    },
+    {
+      "id": "deployment-security-context",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "securityContext": {
+                "privileged": true
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "securityContext",
+      "why": "Container privilegiado."
+    },
+    {
+      "id": "deployment-pod-security-context",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "podSecurityContext": {
+                "runAsUser": 0
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "podSecurityContext",
+      "why": "Roda como root."
+    },
+    {
+      "id": "deployment-env-secret",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "env": [
+                {
+                  "name": "OPENAI_API_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "kagent-aiplat",
+                      "key": "OPENAI_API_KEY"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.env is forbidden",
+      "why": "Injeta a chave do AI Gateway no ambiente do agent."
+    },
+    {
+      "id": "deployment-node-selector",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "nodeSelector": {
+                "appmod.aws.dev/node-pool": "core"
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "nodeSelector",
+      "why": "Escolhe o node onde o agent roda."
+    },
+    {
+      "id": "deployment-tolerations",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "tolerations": [
+                {
+                  "operator": "Exists"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expectMessage": "tolerations",
+      "why": "Tolera qualquer taint e alcança node reservado."
+    },
+    {
+      "id": "deployment-labels",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "labels": {
+                "app.kubernetes.io/name": "kagent"
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.labels must be exactly",
+      "why": "Label extra no pod faria o agent casar o seletor de outra NetworkPolicy; só o label fixo da plataforma é aceito."
+    },
+    {
+      "id": "deployment-annotations",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "annotations": {
+                "kubectl.kubernetes.io/default-container": "x"
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.labels must be exactly",
+      "why": "Annotation arbitrária no pod."
+    },
+    {
+      "id": "deployment-replicas-two",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "replicas": 2
+            }
+          }
+        }
+      },
+      "expectMessage": "replicas may only be 1",
+      "why": "replicas é 1 ativo ou 0 desativado. Qualquer outro valor é escala pelo manifest."
+    },
+    {
+      "id": "tool-write-name",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_apply_manifest"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "toolNames must hold 1 to 5 names",
+      "why": "Tool de escrita pelo nome. Medido: o tool server registra k8s_apply_manifest quando a flag --read-only não está presente."
+    },
+    {
+      "id": "tool-exec-name",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_execute_command"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "toolNames must hold 1 to 5 names",
+      "why": "Execução de comando em pod."
+    },
+    {
+      "id": "tool-undiscovered-but-readonly",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_get_cluster_configuration"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "toolNames must hold 1 to 5 names",
+      "why": "Tool que o servidor REGISTRA em modo read-only mas que o catálogo não permite. Medido: --read-only --tools k8s registra 8 tools, e o catálogo autoriza 5. A allowlist é o catálogo, não o que o servidor expõe."
+    },
+    {
+      "id": "tool-server-swap",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "kagent-tool-server",
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "builder-readonly-tool-server",
+      "why": "Aponta para o tool server cluster-admin que o chart instala por padrão, com nome de tool inocente."
+    },
+    {
+      "id": "tool-type-agent",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "Agent",
+                "agent": {
+                  "name": "k8s-agent",
+                  "apiGroup": "kagent.dev",
+                  "kind": "Agent"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "type McpServer",
+      "why": "Delegação para outro agent, que pode ter tools de escrita. Escalada por composição."
+    },
+    {
+      "id": "tool-mcp-namespace",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "namespace": "default",
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "mcpServer.namespace",
+      "why": "Busca um tool server de nome igual em outro namespace."
+    },
+    {
+      "id": "tool-allowed-headers",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "allowedHeaders": [
+                    "Authorization"
+                  ],
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "allowedHeaders",
+      "why": "Repassa o header Authorization do pedido A2A para a chamada de tool."
+    },
+    {
+      "id": "tool-headers-from-secret",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                },
+                "headersFrom": [
+                  {
+                    "name": "Authorization",
+                    "valueFrom": {
+                      "type": "Secret",
+                      "name": "kagent-openai",
+                      "key": "OPENAI_API_KEY"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "tools[].headersFrom is forbidden",
+      "why": "Campo do item de tools no CRD 0.9.9 (Tool.HeadersFrom []ValueRef). Com valueFrom.type Secret, o controller resolve o Secret no namespace kagent e o injeta no header da chamada de tool, contornando o RBAC sem Secrets do tool server. Achado 3 do review de 13/10/2026."
+    },
+    {
+      "id": "tool-require-approval-off",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "requireApproval": [
+                    "k8s_get_resources"
+                  ],
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "requireApproval",
+      "why": "requireApproval e array de nomes de tool, nao booleano. Campo que o compiler nao emite: fora da allowlist, porque muda o fluxo de aprovacao do agent pelo manifest."
+    },
+    {
+      "id": "tool-names-empty",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": []
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "toolNames must hold 1 to 5 names",
+      "why": "toolNames vazio: em kagent isso costuma significar TODAS as tools do servidor."
+    },
+    {
+      "id": "tool-names-six",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_get_resources",
+                    "k8s_get_events",
+                    "k8s_get_pod_logs",
+                    "k8s_get_resource_yaml",
+                    "k8s_describe_resource",
+                    "k8s_get_resources"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "toolNames must hold 1 to 5 names",
+      "why": "Passa do limite de 5 do catálogo."
+    },
+    {
+      "id": "tools-two-entries",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "tools": [
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_get_resources"
+                  ]
+                }
+              },
+              {
+                "type": "McpServer",
+                "mcpServer": {
+                  "apiGroup": "kagent.dev",
+                  "kind": "RemoteMCPServer",
+                  "name": "builder-readonly-tool-server",
+                  "toolNames": [
+                    "k8s_get_events"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expectMessage": "at most one tools entry",
+      "why": "Dois blocos de tools, ambos apontando para o tool server certo e com tool do catalogo: nenhuma outra validacao reclama, so o limite de um bloco. Isola a regra que esta sendo testada, em vez de deixar outra validacao negar antes."
+    },
+    {
+      "id": "name-without-prefix",
+      "patch": {
+        "metadata": {
+          "name": "pod-health"
+        }
+      },
+      "expectMessage": "must start with the ab- prefix",
+      "why": "Sem o prefixo, o agent sai do alcance de toda regra que usa o prefixo. Casa pelo label de managed-by."
+    },
+    {
+      "id": "namespace-outside-kagent",
+      "patch": {
+        "metadata": {
+          "namespace": "default"
+        }
+      },
+      "expectMessage": "builder agents live only in the kagent namespace",
+      "why": "Agent ab-* aplicado por kubectl em outro namespace. Com o binding restrito a kagent ele nem era avaliado; sem o seletor, a regra de namespace reprova. Achado 5 do review de 13/10/2026."
+    },
+    {
+      "id": "missing-requester-label",
+      "remove": [
+        [
+          "metadata",
+          "labels",
+          "platform.appmod/requester"
+        ]
+      ],
+      "expectMessage": "platform.appmod/requester",
+      "why": "Sem requester não há atribuição: quebra a invariante I8 e o limite por pessoa."
+    },
+    {
+      "id": "empty-requester-label",
+      "patch": {
+        "metadata": {
+          "labels": {
+            "platform.appmod/requester": ""
+          }
+        }
+      },
+      "expectMessage": "platform.appmod/requester",
+      "why": "Requester vazio passa em verificação de presença e não atribui nada."
+    },
+    {
+      "id": "missing-managed-by-label",
+      "remove": [
+        [
+          "metadata",
+          "labels",
+          "app.kubernetes.io/managed-by"
+        ]
+      ],
+      "expectMessage": "app.kubernetes.io/managed-by",
+      "why": "Casa pelo prefixo ab- do nome. Prova que remover o label não escapa da policy, e que o label é exigido de volta."
+    },
+    {
+      "id": "compiler-annotation-wrong",
+      "patch": {
+        "metadata": {
+          "annotations": {
+            "platform.appmod/compiler": "hand-written"
+          }
+        }
+      },
+      "expectMessage": "platform.appmod/compiler",
+      "why": "Manifest não produzido pelo compiler."
+    },
+    {
+      "id": "fixture-label-without-fx-name",
+      "patch": {
+        "metadata": {
+          "labels": {
+            "platform.appmod/fixture": "true"
+          }
+        }
+      },
+      "expectMessage": "ab-fx- name prefix",
+      "why": "Agent normal disfarçado de fixture: entraria no caminho de remoção de fixture, que é o único delete autorizado neste run."
+    },
+    {
+      "id": "fx-name-without-fixture-label",
+      "patch": {
+        "metadata": {
+          "name": "ab-fx-w7run2"
+        }
+      },
+      "expectMessage": "ab-fx- name prefix",
+      "why": "Fixture sem o label: escapa da limpeza do fim do run e fica órfã."
+    },
+    {
+      "id": "declarative-runtime-go",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "runtime": "go"
+          }
+        }
+      },
+      "expectMessage": "runtime must stay python",
+      "why": "runtime escolhe a ADK e, pelo texto do CRD, determina a imagem do container e o readiness probe. Trocar runtime troca a imagem que roda sem mudar mais nada no manifest."
+    },
+    {
+      "id": "missing-system-message",
+      "remove": [
+        [
+          "spec",
+          "declarative",
+          "systemMessage"
+        ]
+      ],
+      "expectMessage": "systemMessage is required",
+      "why": "Sem systemMessage o agent perde as regras de read-only que o compiler escreve. O prompt e pedido e nao garantia, por isso nao e a fronteira de seguranca, mas faz parte da forma fixa da invariante I3 e fecha o caminho irmao do systemMessageFrom."
+    },
+    {
+      "id": "stream-true",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "stream": true
+          }
+        }
+      },
+      "expectMessage": "stream must be false",
+      "why": "Achado 6 da revisao final: stream era emitido pelo compiler e so permitido pela policy, sem valor fixo."
+    },
+    {
+      "id": "resources-raised",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "resources": {
+                "requests": {
+                  "cpu": "4",
+                  "memory": "16Gi"
+                },
+                "limits": {
+                  "memory": "32Gi"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.resources must be exactly the compiler's values",
+      "why": "Achado 6: resources e o unico limite de custo e de blast radius do agent no namespace compartilhado."
+    },
+    {
+      "id": "resources-cpu-limit-added",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "resources": {
+                "limits": {
+                  "cpu": "2",
+                  "memory": "1Gi"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.resources must be exactly the compiler's values",
+      "why": "Chave a mais em limits: o compiler nao emite limite de CPU, de proposito (throttling em vez de OOMKill)."
+    },
+    {
+      "id": "resources-device-claim",
+      "patch": {
+        "spec": {
+          "declarative": {
+            "deployment": {
+              "resources": {
+                "claims": [
+                  {
+                    "name": "gpu"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "deployment.resources must be exactly the compiler's values",
+      "why": "resources.claims e propriedade real do CRD que o compiler nao emite: reivindica device fora da cota do namespace."
+    },
+    {
+      "id": "resources-removed",
+      "remove": [
+        [
+          "spec",
+          "declarative",
+          "deployment",
+          "resources"
+        ]
+      ],
+      "expectMessage": "deployment.resources must be exactly the compiler's values",
+      "why": "Agent sem resources roda sem teto de memoria. O compiler sempre emite o bloco, logo a ausencia e adulteracao."
+    }
+  ],
+  "modelConfigBase": {
+    "apiVersion": "kagent.dev/v1alpha2",
+    "kind": "ModelConfig",
+    "metadata": {
+      "name": "default-model-config",
+      "namespace": "kagent"
+    },
+    "spec": {
+      "model": "claude-sonnet",
+      "provider": "OpenAI",
+      "apiKeySecret": "kagent-aiplat",
+      "apiKeySecretKey": "OPENAI_API_KEY",
+      "openAI": {
+        "baseUrl": "https://ab12cd34ef-vpce-0a1b2c3d4e5f67890.execute-api.us-east-1.amazonaws.com/prod/v1"
+      }
+    }
+  },
+  "modelConfigAllow": [
+    {
+      "id": "model-config-as-bootstrapped",
+      "why": "A ModelConfig que scripts/bootstrap-kagent.sh produz passa como esta. Se este caso falhar, a policy esta mais apertada que o bootstrap."
+    },
+    {
+      "id": "model-config-model-change",
+      "patch": {
+        "spec": {
+          "model": "claude-haiku"
+        }
+      },
+      "why": "Trocar o modelo servido pelo gateway e decisao legitima do dono da plataforma: nao muda destino nem credencial."
+    },
+    {
+      "id": "another-model-config-untouched",
+      "remove": [
+        [
+          "spec",
+          "openAI"
+        ]
+      ],
+      "patch": {
+        "metadata": {
+          "name": "outra-model-config"
+        },
+        "spec": {
+          "provider": "Anthropic",
+          "anthropic": {
+            "baseUrl": "https://api.anthropic.com"
+          }
+        }
+      },
+      "why": "Controle de escopo: ModelConfig que nao e a default-model-config nao e avaliada. Agent do builder nao pode referenciar outra, porque o nome esta fixado na governanca."
+    }
+  ],
+  "modelConfigDeny": [
+    {
+      "id": "model-config-base-url-swap",
+      "patch": {
+        "spec": {
+          "openAI": {
+            "baseUrl": "https://api.openai.com/v1"
+          }
+        }
+      },
+      "expectMessage": "openAI.baseUrl must be the private AI Gateway endpoint",
+      "why": "Achado 3: um patch na ModelConfig manda todo prompt de todos os agents do builder para um endpoint de terceiro, sem tocar manifest nenhum."
+    },
+    {
+      "id": "model-config-public-endpoint-name",
+      "patch": {
+        "spec": {
+          "openAI": {
+            "baseUrl": "https://ab12cd34ef.execute-api.us-east-1.amazonaws.com/prod/v1"
+          }
+        }
+      },
+      "expectMessage": "openAI.baseUrl must be the private AI Gateway endpoint",
+      "why": "O nome publico da MESMA API responde 403 de fora da VPC: so o hostname do VPC endpoint resolve para os IPs privados."
+    },
+    {
+      "id": "model-config-provider-swap",
+      "remove": [
+        [
+          "spec",
+          "openAI"
+        ]
+      ],
+      "patch": {
+        "spec": {
+          "provider": "Anthropic",
+          "anthropic": {
+            "baseUrl": "https://api.anthropic.com"
+          }
+        }
+      },
+      "expectMessage": "must keep provider OpenAI",
+      "why": "Outro provider tira o gateway do caminho, e com ele a auditoria e o controle de uso."
+    },
+    {
+      "id": "model-config-secret-swap",
+      "patch": {
+        "spec": {
+          "apiKeySecret": "outro-secret"
+        }
+      },
+      "expectMessage": "must come from the kagent-aiplat secret",
+      "why": "O controller resolve o Secret no namespace kagent e tem RBAC para ler Secrets: outro nome le a credencial de outra coisa."
+    },
+    {
+      "id": "model-config-secret-key-swap",
+      "patch": {
+        "spec": {
+          "apiKeySecretKey": "OUTRA_CHAVE"
+        }
+      },
+      "expectMessage": "key OPENAI_API_KEY",
+      "why": "Mesma familia do anterior, pela chave dentro do Secret."
+    },
+    {
+      "id": "model-config-api-key-passthrough",
+      "patch": {
+        "spec": {
+          "apiKeyPassthrough": true
+        }
+      },
+      "expectLayer": "schema",
+      "expectMessage": "apiKeyPassthrough is forbidden",
+      "expectSchemaMessage": "apiKeyPassthrough and apiKeySecret are mutually exclusive",
+      "why": "Repassa ao provider o Bearer que chegou na requisicao A2A: a credencial deixa de ser a da plataforma. O CRD recusa primeiro porque apiKeyPassthrough e apiKeySecret são mutuamente exclusivos; a policy mantém o segundo ponto de imposição."
+    },
+    {
+      "id": "model-config-default-headers",
+      "patch": {
+        "spec": {
+          "defaultHeaders": {
+            "X-Tenant": "outro"
+          }
+        }
+      },
+      "expectMessage": "defaultHeaders and openAI.tokenExchange are forbidden",
+      "why": "Header fixo em todo request ao gateway muda quem o gateway ve chamando."
+    },
+    {
+      "id": "model-config-token-exchange",
+      "patch": {
+        "spec": {
+          "openAI": {
+            "tokenExchange": {
+              "type": "GDCHServiceAccount",
+              "gdchServiceAccount": {
+                "audience": "https://gdc.example"
+              }
+            }
+          }
+        }
+      },
+      "expectMessage": "defaultHeaders and openAI.tokenExchange are forbidden",
+      "why": "Troca credencial por um bearer dinamico antes da chamada ao modelo."
+    },
+    {
+      "id": "model-config-tls-disable-verify",
+      "patch": {
+        "spec": {
+          "tls": {
+            "disableVerify": true
+          }
+        }
+      },
+      "expectMessage": "spec.tls is forbidden",
+      "why": "Com a verificacao desligada, a URL certa aceita um endpoint que nao e o gateway."
+    },
+    {
+      "id": "model-config-tls-custom-ca",
+      "patch": {
+        "spec": {
+          "tls": {
+            "caCertSecretRef": "ca-do-atacante",
+            "caCertSecretKey": "ca.crt"
+          }
+        }
+      },
+      "expectMessage": "spec.tls is forbidden",
+      "why": "Trocar a ancora de confianca tem o mesmo efeito de desligar a verificacao, de forma mais silenciosa."
+    },
+    {
+      "id": "model-config-second-provider-block",
+      "patch": {
+        "spec": {
+          "bedrock": {
+            "region": "us-east-1"
+          }
+        }
+      },
+      "expectLayer": "schema",
+      "expectMessage": "only the openAI provider block is allowed",
+      "expectSchemaMessage": "provider.bedrock must be nil if the provider is not Bedrock",
+      "why": "Segundo ponto de imposição do provider, independente do pin de provider. O CRD recusa primeiro porque o bloco não corresponde ao provider OpenAI; a policy mantém o segundo ponto de imposição."
+    }
+  ],
+  "dualEnforced": [
+    {
+      "messageContains": "spec is required",
+      "reason": "O CRD declara default para spec.type, logo o API server materializa spec em todo objeto e esta validacao nunca dispara. Fica como guarda fail-closed se o default sair numa versao futura."
+    },
+    {
+      "messageContains": "spec.declarative is required",
+      "reason": "A XValidation do proprio CRD ja exige (type==Declarative && has(declarative)) || (type==BYO && has(byo)). Segundo ponto de imposicao, no schema."
+    },
+    {
+      "messageContains": "spec.type must be Declarative",
+      "reason": "O CRD limita type ao enum [Declarative, BYO] e exige o bloco correspondente. O caso type-byo e negado pelo schema, com expectLayer schema."
+    },
+    {
+      "messageContains": "every tool must be type McpServer",
+      "reason": "O CRD limita tools[].type ao enum [McpServer, Agent] e a validacao seguinte exige mcpServer com o nome do tool server do builder, o que uma tool type Agent nao tem. Mantida porque e a unica que nomeia a ameaca de delegacao entre agents."
+    },
+    {
+      "messageContains": "apiKeyPassthrough is forbidden",
+      "reason": "O CRD v0.9.9 já torna apiKeyPassthrough e apiKeySecret mutuamente exclusivos. A policy mantém um segundo ponto de imposição caso o schema seja relaxado numa versão futura."
+    },
+    {
+      "messageContains": "must keep provider OpenAI",
+      "reason": "A policy também exige o bloco openAI.baseUrl, e o CRD exige que o bloco corresponda ao provider. Remover apenas este pin continua negando qualquer provider alternativo pelas duas regras restantes."
+    },
+    {
+      "messageContains": "only the openAI provider block is allowed",
+      "reason": "O CRD v0.9.9 exige que o bloco de provider corresponda ao provider escolhido. A policy fixa novamente apenas openAI para proteger contra relaxamento futuro do schema."
+    }
+  ],
+  "crdFields": {
+    "provenance": "Propriedades reais do CRD agents.kagent.dev v1alpha2, chart kagent-crds 0.9.9, lidas em 13/10/2026. Base da allowlist da ValidatingAdmissionPolicy: campo que nao esta em emittedByCompiler tem de aparecer em alguma validacao. O grupo tool (item de spec.declarative.tools) entrou em 13/10/2026, pelo achado 3 do review: Tool em go/api/v1alpha2/agent_types.go do kagent v0.9.9. Os grupos aninhados a2aConfig, a2aSkill (item de a2aConfig.skills) e resources (deployment.resources) entraram em 13/10/2026, lidos do CRD vivo do lab, pelo risco residual do review da rodada 4: campo novo nesses nós passava o --crd-drift. limits e requests são mapas (additionalProperties), sem properties a comparar.",
+    "spec": [
+      "allowedNamespaces",
+      "byo",
+      "declarative",
+      "description",
+      "sandbox",
+      "skills",
+      "type"
+    ],
+    "declarative": [
+      "a2aConfig",
+      "context",
+      "deployment",
+      "executeCodeBlocks",
+      "memory",
+      "modelConfig",
+      "promptTemplate",
+      "runtime",
+      "stream",
+      "systemMessage",
+      "systemMessageFrom",
+      "tools"
+    ],
+    "deployment": [
+      "affinity",
+      "annotations",
+      "env",
+      "extraContainers",
+      "imagePullPolicy",
+      "imagePullSecrets",
+      "imageRegistry",
+      "labels",
+      "nodeSelector",
+      "podSecurityContext",
+      "replicas",
+      "resources",
+      "securityContext",
+      "serviceAccountConfig",
+      "serviceAccountName",
+      "tolerations",
+      "volumeMounts",
+      "volumes"
+    ],
+    "mcpServer": [
+      "allowedHeaders",
+      "apiGroup",
+      "kind",
+      "name",
+      "namespace",
+      "requireApproval",
+      "toolNames"
+    ],
+    "tool": [
+      "agent",
+      "headersFrom",
+      "mcpServer",
+      "type"
+    ],
+    "a2aConfig": [
+      "skills"
+    ],
+    "a2aSkill": [
+      "description",
+      "examples",
+      "id",
+      "inputModes",
+      "name",
+      "outputModes",
+      "tags"
+    ],
+    "resources": [
+      "claims",
+      "limits",
+      "requests"
+    ],
+    "emittedByCompiler": {
+      "spec": [
+        "declarative",
+        "description",
+        "type"
+      ],
+      "declarative": [
+        "a2aConfig",
+        "deployment",
+        "modelConfig",
+        "stream",
+        "systemMessage",
+        "tools"
+      ],
+      "deployment": [
+        "replicas",
+        "resources"
+      ],
+      "mcpServer": [
+        "apiGroup",
+        "kind",
+        "name",
+        "toolNames"
+      ],
+      "tool": [
+        "mcpServer",
+        "type"
+      ],
+      "a2aConfig": [
+        "skills"
+      ],
+      "a2aSkill": [
+        "description",
+        "examples",
+        "id",
+        "name",
+        "tags"
+      ],
+      "resources": [
+        "limits",
+        "requests"
+      ]
+    },
+    "defaultedByCrd": {
+      "spec.type": "Declarative",
+      "spec.declarative.runtime": "python"
+    }
+  }
+}

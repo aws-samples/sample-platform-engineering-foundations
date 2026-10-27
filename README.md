@@ -505,6 +505,10 @@ Full procedure, including step 5 and the cases that commonly get stuck, in
 
 A separate extension provides a [Platform Engineering demo on Amazon EKS local clusters on AWS Outposts](extensions/eks-outposts-platform-engineering/README.md), with Amazon EBS gp2 storage and equivalent CloudFormation and Terraform fronts feeding one shared GitOps platform. It does not change the workshop or self-paced paths above.
 
+## Related Demo: Internal Developer Platform portal on Amazon EKS
+
+A separate extension provides an [Internal Developer Platform portal](extensions/idp-portal/README.md) on top of the platform this repository builds: a Cloudscape single-page application with a service catalog, a provisioning wizard that turns requests into Git changes, an inventory of kro instances and their ACK children, compositions with their GraphRevisions, scorecards, teams and owners, promotion between logical environments, notifications and an audit trail, served from CloudFront with Amazon Cognito authentication and two Lambda APIs behind an API Gateway JWT authorizer. It does not change the workshop or self-paced paths above.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Please open an issue before submitting substantial changes.

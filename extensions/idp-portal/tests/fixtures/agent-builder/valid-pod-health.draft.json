@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "agent-draft/v1",
+  "name": "ab-pod-health",
+  "displayName": "Saúde dos pods",
+  "description": "Encontra pods fora de Running em um namespace e explica a causa provável de cada um.",
+  "language": "pt-BR",
+  "instructions": [
+    "Pergunte o namespace quando ele não vier na mensagem.",
+    "Liste os pods do namespace com k8s_get_resources e separe os que não estão em Running.",
+    "Para cada pod separado, leia os eventos com k8s_get_events e resuma a causa provável em uma linha."
+  ],
+  "tools": ["k8s_get_events", "k8s_get_resources"],
+  "skills": [
+    {
+      "id": "pod-health",
+      "name": "Saúde dos pods",
+      "description": "Encontra pods fora de Running e explica a causa provável.",
+      "examples": ["Quais pods não estão rodando no namespace appmod?"]
+    }
+  ]
+}

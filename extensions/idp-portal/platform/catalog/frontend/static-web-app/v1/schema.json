@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StaticWebApp",
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+      "description": "Global bucket name; include a unique suffix such as the account id."
+    },
+    "environment": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "lab",
+        "internal",
+        "demo",
+        "prod"
+      ],
+      "default": "dev"
+    },
+    "owner": {
+      "type": "string",
+      "default": "platform-team"
+    },
+    "indexDocument": {
+      "type": "string",
+      "default": "index.html"
+    },
+    "priceClass": {
+      "type": "string",
+      "enum": [
+        "PriceClass_100",
+        "PriceClass_200",
+        "PriceClass_All"
+      ],
+      "default": "PriceClass_100"
+    },
+    "contentSecurityPolicy": {
+      "type": "string",
+      "default": "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    },
+    "lifecycle": {
+      "type": "string",
+      "enum": [
+        "persistent",
+        "ephemeral"
+      ],
+      "default": "persistent",
+      "description": "ephemeral só no espaço de nomes reservado (tour-*), com expiresAt; o reaper abre o MR de remoção ao vencer"
+    },
+    "deletionPolicy": {
+      "type": "string",
+      "enum": [
+        "retain",
+        "delete"
+      ],
+      "default": "retain",
+      "description": "delete só com lifecycle ephemeral; imutável depois da criação"
+    },
+    "expiresAt": {
+      "type": "string",
+      "default": "",
+      "description": "ISO 8601 UTC; obrigatório quando lifecycle é ephemeral"
+    }
+  },
+  "additionalProperties": false
+}

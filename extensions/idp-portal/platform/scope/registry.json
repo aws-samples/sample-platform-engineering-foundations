@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "organization": {
+    "id": "appmod-latam",
+    "name": "AppMod LATAM",
+    "owner": { "team": "platform-team", "contact": "platform-admin" }
+  },
+  "environments": [
+    {
+      "id": "lab",
+      "name": "Lab",
+      "cluster": "appmod-agent-platform-lab",
+      "region": "sa-east-1",
+      "account": "111122223333",
+      "promotesTo": "staging"
+    },
+    {
+      "id": "staging",
+      "name": "Staging",
+      "cluster": "appmod-agent-platform-lab",
+      "region": "sa-east-1",
+      "account": "111122223333",
+      "promotesTo": null
+    }
+  ],
+  "projects": [
+    {
+      "id": "agent-platform",
+      "name": "Agent Platform",
+      "description": "Instâncias kro e ACK do self-service, aplicadas pela Application agent-platform-instances.",
+      "environment": "lab",
+      "appProject": "default",
+      "namespaces": ["appmod"],
+      "gitopsPath": "platform/instances",
+      "argoApplications": ["agent-platform-instances", "agent-platform-compositions"],
+      "owner": { "team": "platform-team", "contact": "platform-admin" },
+      "members": [{ "principal": "*", "role": "contributor" }],
+      "quota": { "maxInstances": null, "enforced": false },
+      "lifecycle": { "state": "active" },
+      "promotesTo": "agent-platform-staging"
+    },
+    {
+      "id": "agent-platform-staging",
+      "name": "Agent Platform (Staging)",
+      "description": "Ambiente lógico de staging no mesmo cluster: instâncias promovidas de agent-platform, no namespace appmod-staging, aplicadas pela mesma Application agent-platform-instances.",
+      "environment": "staging",
+      "appProject": "default",
+      "namespaces": ["appmod-staging"],
+      "gitopsPath": "platform/instances",
+      "argoApplications": ["agent-platform-instances", "agent-platform-compositions"],
+      "owner": { "team": "platform-team", "contact": "platform-admin" },
+      "members": [{ "principal": "*", "role": "contributor" }],
+      "quota": { "maxInstances": 10, "enforced": false },
+      "lifecycle": { "state": "active" }
+    },
+    {
+      "id": "agent-builder",
+      "name": "Agent Builder",
+      "description": "Agents kagent governados, só kagent.dev/Agent no namespace kagent (ADR-0008).",
+      "environment": "lab",
+      "appProject": "agent-builder",
+      "namespaces": ["kagent"],
+      "gitopsPath": "platform/agents",
+      "argoApplications": ["agent-platform-agents"],
+      "owner": { "team": "platform-team", "contact": "platform-admin" },
+      "members": [{ "principal": "*", "role": "contributor" }],
+      "quota": { "maxInstances": null, "enforced": false },
+      "lifecycle": { "state": "active" }
+    }
+  ],
+  "teams": [
+    {
+      "id": "platform-team",
+      "name": "Platform Team",
+      "description": "Time de especialistas de Application Modernization da AWS LATAM, dono da plataforma e das composições do catálogo.",
+      "contacts": ["platform-admin"],
+      "slack": { "channel": "#platform-team", "url": "https://slack.example.com/archives/PLATFORM" },
+      "oncall": ""
+    }
+  ]
+}

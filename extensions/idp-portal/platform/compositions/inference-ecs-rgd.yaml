@@ -1,0 +1,185 @@
+# Golden Path B (variante ECS): Inference de modelo em containers no ECS Fargate, via ACK.
+# Mesmo contrato de spec da variante EKS (inference-eks). Cluster ECS dedicado por instância
+# (Container Insights on), TaskDefinition Fargate (awsvpc, non-root, readonly rootfs, logs no
+# CloudWatch) e Service em subnets PRIVADAS sem IP público, com circuit breaker + rollback.
+# Hardening da conta: deletion-policy retain + tag auto-delete=no.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: inference-ecs
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: InferenceECS
+    spec:
+      name: string
+      environment: string | default="dev"
+      owner: string | default="platform-team"
+      image: string
+      containerPort: integer | default=8080
+      healthPath: string | default="/health"
+      modelId: string | default=""
+      # Fargate: cpu em unidades (256..16384) e memory em MiB compatível com o cpu
+      cpu: string | default="512"
+      memory: string | default="1024"
+      # arm64 (Graviton, default) | x86_64
+      cpuArchitecture: string | default="ARM64"
+      desiredCount: integer | default=1
+      # Rede: subnets privadas e SG. Defaults = VPC da plataforma (sa-east-1).
+      subnets: '[]string | default=["subnet-0cdb3f4b15e5f2f8a","subnet-0ff79588d9cbf0bd2","subnet-07ae1c74808213824"]'
+      securityGroups: '[]string | default=["sg-094e1acd6da560184"]'
+      # Role de execução (pull ECR + logs). Default = role da plataforma.
+      executionRoleArn: string | default="arn:aws:iam::111122223333:role/AppModPlatformECSTaskExecutionRole"
+    status:
+      clusterArn: ${cluster.status.ackResourceMetadata.arn}
+      serviceArn: ${service.status.ackResourceMetadata.arn}
+      runningCount: ${service.status.runningCount}
+      serviceStatus: ${service.status.status}
+
+  resources:
+    - id: logGroup
+      readyWhen:
+        - ${logGroup.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: cloudwatchlogs.services.k8s.aws/v1alpha1
+        kind: LogGroup
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: retain
+          name: ${schema.spec.name}-logs
+        spec:
+          name: /platform/inference/${schema.spec.name}
+          retentionDays: 30
+          tags:
+            auto-delete: "no"
+            Environment: ${schema.spec.environment}
+            ManagedBy: KRO-ACK
+            platform:capability: inference-ecs
+            platform:owner: ${schema.spec.owner}
+
+    - id: cluster
+      readyWhen:
+        - ${cluster.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: ecs.services.k8s.aws/v1alpha1
+        kind: Cluster
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: retain
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          capacityProviders: [FARGATE, FARGATE_SPOT]
+          settings:
+            - name: containerInsights
+              value: enabled
+          tags:
+            - key: auto-delete
+              value: "no"
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+            - key: platform:capability
+              value: inference-ecs
+            - key: platform:owner
+              value: ${schema.spec.owner}
+
+    - id: taskDefinition
+      readyWhen:
+        - ${taskDefinition.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: ecs.services.k8s.aws/v1alpha1
+        kind: TaskDefinition
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: retain
+          name: ${schema.spec.name}
+        spec:
+          family: ${schema.spec.name}
+          networkMode: awsvpc
+          requiresCompatibilities: [FARGATE]
+          cpu: ${schema.spec.cpu}
+          memory: ${schema.spec.memory}
+          executionRoleARN: ${schema.spec.executionRoleArn}
+          runtimePlatform:
+            cpuArchitecture: ${schema.spec.cpuArchitecture}
+            operatingSystemFamily: LINUX
+          containerDefinitions:
+            - name: inference
+              image: ${schema.spec.image}
+              essential: true
+              readonlyRootFilesystem: true
+              user: "101"
+              # hostPort explícito e env em ordem alfabética: a AWS normaliza ambos e, sem isso,
+              # o controller ACK vê drift a cada reconcile e registra revisão nova em loop.
+              portMappings:
+                - containerPort: ${schema.spec.containerPort}
+                  hostPort: ${schema.spec.containerPort}
+                  protocol: tcp
+                  appProtocol: http
+              environment:
+                - name: MODEL_ID
+                  value: ${schema.spec.modelId}
+                - name: PORT
+                  value: ${string(schema.spec.containerPort)}
+              linuxParameters:
+                initProcessEnabled: true
+                tmpfs:
+                  - containerPath: /tmp
+                    size: 64
+              logConfiguration:
+                logDriver: awslogs
+                options:
+                  # referência CEL cria a dependência logGroup -> taskDefinition
+                  awslogs-group: ${logGroup.spec.name}
+                  awslogs-region: sa-east-1
+                  awslogs-stream-prefix: inference
+          tags:
+            - key: auto-delete
+              value: "no"
+            - key: ManagedBy
+              value: KRO-ACK
+
+    - id: service
+      readyWhen:
+        - ${service.status.conditions.exists(x, x.type == 'ACK.ResourceSynced' && x.status == "True")}
+      template:
+        apiVersion: ecs.services.k8s.aws/v1alpha1
+        kind: Service
+        metadata:
+          annotations:
+            services.k8s.aws/deletion-policy: retain
+          name: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.name}
+          cluster: ${cluster.spec.name}
+          taskDefinition: ${taskDefinition.status.ackResourceMetadata.arn}
+          desiredCount: ${schema.spec.desiredCount}
+          launchType: FARGATE
+          platformVersion: LATEST
+          enableECSManagedTags: true
+          propagateTags: SERVICE
+          enableExecuteCommand: false
+          deploymentConfiguration:
+            deploymentCircuitBreaker:
+              enable: true
+              rollback: true
+            maximumPercent: 200
+            minimumHealthyPercent: 100
+          networkConfiguration:
+            awsVPCConfiguration:
+              assignPublicIP: DISABLED
+              subnets: ${schema.spec.subnets}
+              securityGroups: ${schema.spec.securityGroups}
+          tags:
+            - key: auto-delete
+              value: "no"
+            - key: Environment
+              value: ${schema.spec.environment}
+            - key: ManagedBy
+              value: KRO-ACK
+            - key: platform:capability
+              value: inference-ecs
+            - key: platform:owner
+              value: ${schema.spec.owner}

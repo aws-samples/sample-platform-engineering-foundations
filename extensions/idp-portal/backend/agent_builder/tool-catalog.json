@@ -1,0 +1,48 @@
+{
+  "catalogVersion": "agent-builder-tools/v1",
+  "description": "Closed allowlist of tools a builder agent may receive. Every entry is read-only. The enum in agent-draft.schema.json must equal the list of names below, in this order. Contract owner: docs/agent-platform/design-agent-builder.md.",
+  "toolServer": {
+    "apiGroup": "kagent.dev",
+    "kind": "RemoteMCPServer",
+    "name": "builder-readonly-tool-server",
+    "namespace": "kagent"
+  },
+  "fixed": {
+    "namespace": "kagent",
+    "modelConfig": "default-model-config",
+    "compiler": "agent-builder/v1",
+    "gitPath": "platform/agents/{name}.json",
+    "mirrorPath": "agents/{name}.json",
+    "resources": {
+      "requests": {"cpu": "100m", "memory": "384Mi"},
+      "limits": {"memory": "1Gi"}
+    }
+  },
+  "tools": [
+    {
+      "name": "k8s_get_resources",
+      "summary": "List resources of one type, optionally in one namespace.",
+      "summaryPt": "Lista recursos de um tipo, opcionalmente em um namespace."
+    },
+    {
+      "name": "k8s_get_resource_yaml",
+      "summary": "Read the YAML of one resource. Secrets are denied by the tool server RBAC.",
+      "summaryPt": "Lê o YAML de um recurso. Secrets são negados pelo RBAC do tool server."
+    },
+    {
+      "name": "k8s_describe_resource",
+      "summary": "Describe one resource, including recent events.",
+      "summaryPt": "Descreve um recurso, incluindo eventos recentes."
+    },
+    {
+      "name": "k8s_get_events",
+      "summary": "List events, optionally in one namespace.",
+      "summaryPt": "Lista eventos, opcionalmente em um namespace."
+    },
+    {
+      "name": "k8s_get_pod_logs",
+      "summary": "Read the last lines of a pod log.",
+      "summaryPt": "Lê as últimas linhas do log de um pod."
+    }
+  ]
+}

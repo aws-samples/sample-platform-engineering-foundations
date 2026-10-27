@@ -1,0 +1,17 @@
+node_modules/
+build/
+.vite/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+backend/**/.build/
+infrastructure/terraform/.terraform/
+infrastructure/terraform/*.tfplan
+infrastructure/terraform/*.tfstate
+infrastructure/terraform/*.tfstate.backup
+infrastructure/terraform/.terraform.lock.hcl
+infrastructure/terraform/*.auto.tfvars
+infrastructure/terraform/.spa-build.env
+.env
+.env.*
+.DS_Store

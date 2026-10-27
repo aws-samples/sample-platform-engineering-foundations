@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: static-web-app
+  domain: frontend
+  version: v1
+spec:
+  displayName: Static web app (CloudFront + S3)
+  displayNamePt: Web app estática (CloudFront + S3)
+  description: AWS-standard static site - CloudFront with HTTPS redirect, private S3 origin via Origin Access Control, versioning, SSE and security headers (HSTS, CSP, nosniff, DENY framing).
+  descriptionPt: Site estático no padrão AWS - CloudFront com redirect HTTPS, origem S3 privada via Origin Access Control, versionamento, SSE e security headers (HSTS, CSP, nosniff, DENY framing).
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: available
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/static-web-app-rgd.yaml
+  goldenPath: GP-A
+  relations: {requires: [], composes: [static-site]}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

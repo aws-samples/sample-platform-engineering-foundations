@@ -1,0 +1,3 @@
+{"$schema":"http://json-schema.org/draft-07/schema#","title":"StaticSite","type":"object","required":["name"],
+ "properties":{"name":{"type":"string","description":"Globally unique bucket name (include account suffix)"},
+ "environment":{"type":"string","default":"dev"}},"additionalProperties":false}

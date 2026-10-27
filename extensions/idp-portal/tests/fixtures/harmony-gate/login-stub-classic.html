@@ -1,0 +1,15 @@
+//<html><head><meta name="robots" content="noindex"><style type="text/css">body { display: none; };</style><script>
+        setTimeout(function() {
+            if (window.location.hash && window.location.hash.indexOf('#id_token') === 0) {
+                const idTokenParameter = 'id_token=';
+                window.location = 'https://' + window.location.host + '/' + window.location.pathname + '?' + idTokenParameter + window.location.hash.substring(idTokenParameter.length + 1);
+            } else {
+                const currentUrl = new URL(window.location.href);
+                let targetUrl = currentUrl.origin + currentUrl.pathname + currentUrl.search;
+                if (window.location.host.match(/\.harmony\.a2z\.com$/)) {
+                    targetUrl = targetUrl.replace(/^http:/, 'https:');
+                }
+                window.location = 'https://portal.example.com/server-login?targetUrlBase64=' + encodeURIComponent(btoa(targetUrl)) + window.location.hash;
+            }
+        }, 1);
+        //</script><script>const $body = document.querySelector("body"); $body.innerHTML = '<div style="text-align: center; margin-top: 20%; font-family:Amazon Ember,Helvetica Neue,Roboto,Arial,sans-serif">Hang on, we&apos;ve got some formalities to take care of first...</div>'; </script></head><body></body></html>

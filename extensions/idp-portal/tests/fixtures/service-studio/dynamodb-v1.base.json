@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "service-draft/v1",
+  "domain": "database",
+  "name": "dynamodb",
+  "version": "v1",
+  "displayName": "DynamoDB table",
+  "description": "On-demand encrypted DynamoDB table behind a focused API.",
+  "owner": "platform-team",
+  "engine": "ack",
+  "pattern": "kro + ACK",
+  "lifecycle": "preview",
+  "goldenPath": "GP-I2",
+  "fields": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "hashKeyName",
+      "type": "string",
+      "required": false,
+      "default": "id"
+    },
+    {
+      "name": "hashKeyType",
+      "type": "string",
+      "required": false,
+      "default": "N",
+      "enum": [
+        "S",
+        "N",
+        "B"
+      ]
+    },
+    {
+      "name": "environment",
+      "type": "string",
+      "required": false,
+      "default": "dev"
+    }
+  ],
+  "displayNamePt": "Tabela DynamoDB",
+  "descriptionPt": "Tabela DynamoDB on-demand atrás de uma API enxuta.",
+  "rgdRef": "platform/compositions/dynamodb-table-rgd.yaml"
+}

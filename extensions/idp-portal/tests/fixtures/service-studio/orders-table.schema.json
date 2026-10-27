@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DynamoDBTable",
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Table name",
+      "description": "Lowercase DNS label.",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "examples": [
+        "orders"
+      ]
+    },
+    "hashKeyName": {
+      "type": "string",
+      "title": "Partition key",
+      "default": "id"
+    },
+    "hashKeyType": {
+      "type": "string",
+      "title": "Partition key type",
+      "enum": [
+        "S",
+        "N"
+      ],
+      "default": "N"
+    },
+    "environment": {
+      "type": "string",
+      "title": "Environment",
+      "enum": [
+        "dev",
+        "internal",
+        "prod"
+      ],
+      "default": "dev"
+    }
+  },
+  "additionalProperties": false
+}

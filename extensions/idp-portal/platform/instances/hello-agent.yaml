@@ -1,0 +1,12 @@
+apiVersion: kro.run/v1alpha1
+kind: ScheduledAgent
+metadata:
+  labels:
+    platform.appmod/owner: platform-team
+  name: hello-agent
+  namespace: appmod
+spec:
+  agentName: hello-agent
+  schedule: "0 10 * * 1"
+  message: AGENT_PLATFORM_READY
+  suspend: true

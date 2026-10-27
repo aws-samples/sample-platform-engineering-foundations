@@ -1,0 +1,14 @@
+apiVersion: kro.run/v1alpha1
+kind: StaticWebApp
+metadata:
+  name: tour-platform-admin
+  namespace: appmod
+  labels:
+    platform.appmod/tour: "true"
+spec:
+  name: appmod-tour-platform-admin-111122223333
+  environment: lab
+  owner: platform-admin
+  lifecycle: ephemeral
+  deletionPolicy: delete
+  expiresAt: "2026-10-24T09:21:24Z"

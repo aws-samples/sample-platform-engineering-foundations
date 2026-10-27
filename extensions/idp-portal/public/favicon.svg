@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#232f3e"/>
+  <!-- tres camadas empilhadas (app -> plataforma -> infra); a de cima, em laranja, e a modernizada -->
+  <g stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M16 6.5 26 11.5 16 16.5 6 11.5Z" stroke="#ff9900" fill="#ff9900" fill-opacity=".25"/>
+    <path d="M6 16.5 16 21.5 26 16.5" stroke="#ffffff"/>
+    <path d="M6 21 16 26 26 21" stroke="#ffffff"/>
+  </g>
+</svg>

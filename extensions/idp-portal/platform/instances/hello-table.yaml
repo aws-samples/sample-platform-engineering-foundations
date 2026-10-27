@@ -1,0 +1,12 @@
+apiVersion: kro.run/v1alpha1
+kind: DynamoDBTable
+metadata:
+  labels:
+    platform.appmod/owner: platform-team
+  name: hello-table
+  namespace: appmod
+spec:
+  name: appmod-hello-table
+  hashKeyName: id
+  hashKeyType: S
+  environment: lab

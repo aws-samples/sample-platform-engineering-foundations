@@ -1,0 +1,9 @@
+# Standalone example — fronts an existing Lambda function
+apiVersion: kro.run/v1alpha1
+kind: WebAPI
+metadata:
+  name: sample-api
+spec:
+  name: sample-api
+  targetFunctionArn: arn:aws:lambda:us-east-1:111122223333:function:sample-function
+  environment: dev

@@ -1,0 +1,496 @@
+{
+  "description": "Contrato dos sinais estruturados do Agent Builder. Extende a convenção que o repo já usa nas três Lambdas: uma linha de stdout por evento, um objeto JSON, chave 'event'. Proposta deste worker (e2e-observability); exige ratificação do W0 antes de virar obrigação de W2, W4 e W5.",
+  "convention": "print(json.dumps({\"event\": \"<nome>\", ...}))",
+  "specVersion": "agent-builder-observability/v1",
+  "maxValueChars": 300,
+  "truncatedDetailFields": [
+    "detail",
+    "error"
+  ],
+  "measureSuffixes": [
+    "_chars",
+    "_count",
+    "_bytes",
+    "_len",
+    "_sha256",
+    "_ms",
+    "_seconds"
+  ],
+  "forbiddenFieldNames": [
+    "answer",
+    "apiKey",
+    "authorization",
+    "completion",
+    "cookie",
+    "credential",
+    "draft",
+    "instruction",
+    "instructions",
+    "manifest",
+    "message",
+    "password",
+    "prompt",
+    "secret",
+    "systemMessage",
+    "text",
+    "token",
+    "userMessage"
+  ],
+  "forbiddenFieldSubstrings": [
+    "answer",
+    "apikey",
+    "authorization",
+    "cookie",
+    "credential",
+    "instruction",
+    "password",
+    "prompt",
+    "secret",
+    "systemmessage",
+    "token"
+  ],
+  "forbiddenValuePatterns": [
+    {
+      "id": "aws-access-key-id",
+      "regex": "(?<![A-Z0-9])(AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])",
+      "why": "credencial de longa duração ou de sessão no corpo do log"
+    },
+    {
+      "id": "bearer-token",
+      "regex": "(?i)\\bbearer\\s+[A-Za-z0-9._\\-]{20,}",
+      "why": "header de autorização copiado para o log"
+    },
+    {
+      "id": "pem-private-key",
+      "regex": "-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----",
+      "why": "chave privada com corpo, não apenas o header"
+    },
+    {
+      "id": "jwt",
+      "regex": "\\beyJ[A-Za-z0-9_\\-]{10,}\\.[A-Za-z0-9_\\-]{10,}\\.",
+      "why": "token assinado de sessão"
+    },
+    {
+      "id": "assigned-secret-value",
+      "regex": "(?i)\\b(?:aws_)?secret_access_key\\b\\s*[:=]\\s*\\S{20,}",
+      "why": "valor atribuido a um campo de segredo, não o nome do campo"
+    }
+  ],
+  "events": {
+    "agent_builder_draft_generated": {
+      "emitter": "platform_bff",
+      "when": "POST /gateway/agent-drafts/generate termina, com qualquer desfecho",
+      "required": [
+        "event",
+        "request_id",
+        "caller_alias",
+        "outcome",
+        "duration_ms",
+        "prompt_chars",
+        "tools_offered"
+      ],
+      "optional": [
+        "draft_sha256",
+        "model_id",
+        "draft_bytes",
+        "error_code"
+      ],
+      "enums": {
+        "outcome": [
+          "ok",
+          "invalid_json",
+          "schema_invalid",
+          "timeout",
+          "upstream_error"
+        ]
+      },
+      "numeric": [
+        "duration_ms",
+        "prompt_chars",
+        "tools_offered",
+        "draft_bytes"
+      ],
+      "invariants": [
+        {
+          "field": "tools_offered",
+          "equals": 0,
+          "why": "I1: o modelo não recebe tool nenhuma"
+        }
+      ]
+    },
+    "agent_builder_draft_rejected": {
+      "emitter": "platform_api",
+      "when": "preview ou provision-request recusado pela validação",
+      "required": [
+        "event",
+        "request_id",
+        "caller_alias",
+        "error_count",
+        "first_error_path",
+        "first_error_code"
+      ],
+      "optional": [
+        "name",
+        "op"
+      ],
+      "enums": {},
+      "numeric": [
+        "error_count"
+      ],
+      "invariants": []
+    },
+    "agent_builder_preview_rendered": {
+      "emitter": "platform_api",
+      "when": "POST /platform/agent-drafts/preview respondeu 200",
+      "required": [
+        "event",
+        "request_id",
+        "caller_alias",
+        "draft_sha256",
+        "manifest_bytes",
+        "tool_count"
+      ],
+      "optional": [
+        "name",
+        "language"
+      ],
+      "enums": {},
+      "numeric": [
+        "manifest_bytes",
+        "tool_count"
+      ],
+      "invariants": []
+    },
+    "agent_builder_request_created": {
+      "emitter": "platform_api",
+      "when": "item do Auto-MR gravado com kind kagent-agent",
+      "required": [
+        "event",
+        "request_id",
+        "caller_alias",
+        "op",
+        "name",
+        "draft_sha256"
+      ],
+      "optional": [
+        "admin"
+      ],
+      "enums": {
+        "op": [
+          "create",
+          "disable"
+        ]
+      },
+      "numeric": [],
+      "invariants": []
+    },
+    "agent_builder_request_failed": {
+      "emitter": "ci",
+      "when": "o CI move o item para failed",
+      "required": [
+        "event",
+        "request_id",
+        "op",
+        "name",
+        "reason_code"
+      ],
+      "optional": [
+        "requester"
+      ],
+      "enums": {
+        "op": [
+          "create",
+          "disable"
+        ],
+        "reason_code": [
+          "draft_invalid",
+          "manifest_mismatch",
+          "policy_rejected",
+          "already_exists",
+          "limit_agents",
+          "limit_active_per_requester",
+          "not_owner",
+          "file_missing",
+          "claim_lost"
+        ]
+      },
+      "numeric": [],
+      "invariants": []
+    },
+    "agent_builder_mr_opened": {
+      "emitter": "ci",
+      "when": "MR aberto para o pedido",
+      "required": [
+        "event",
+        "request_id",
+        "op",
+        "name",
+        "mr_iid",
+        "branch"
+      ],
+      "optional": [
+        "draft_sha256"
+      ],
+      "enums": {
+        "op": [
+          "create",
+          "disable"
+        ]
+      },
+      "numeric": [
+        "mr_iid"
+      ],
+      "invariants": []
+    },
+    "agent_builder_agent_observed": {
+      "emitter": "cluster_api",
+      "when": "GET /cluster/agents/{name} respondeu 200. A rota de lista nao emite: ela nao le os Events, entao a causa sairia sem classificacao",
+      "required": [
+        "event",
+        "name",
+        "caller_alias",
+        "phase",
+        "cause",
+        "generation",
+        "observed_generation",
+        "argo_tracked",
+        "age_seconds",
+        "fresh"
+      ],
+      "optional": [
+        "replicas",
+        "accepted_status",
+        "ready_status",
+        "accepted_reason",
+        "ready_reason",
+        "event_reasons",
+        "event_reasons_other_count",
+        "time_to_ready_seconds",
+        "stale_reasons"
+      ],
+      "enums": {
+        "phase": [
+          "NOT_FOUND",
+          "REQUESTED",
+          "IN_REVIEW",
+          "FAILED",
+          "CLOSED",
+          "SYNCING",
+          "SYNC_STALLED",
+          "REJECTED",
+          "DISABLED",
+          "STARTING",
+          "STALLED",
+          "READY",
+          "VERIFIED",
+          "TEST_FAILED"
+        ],
+        "cause": [
+          "NONE",
+          "IMAGE_PULL",
+          "CONFIG_MISSING",
+          "OOM_KILLED",
+          "CRASH_LOOP",
+          "UNSCHEDULABLE",
+          "QUOTA",
+          "CONTROLLER_REJECTED",
+          "MODEL_CONFIG_MISSING",
+          "NOT_TRACKED_BY_ARGO",
+          "UNKNOWN"
+        ]
+      },
+      "numeric": [
+        "generation",
+        "observed_generation",
+        "age_seconds",
+        "event_reasons_other_count",
+        "time_to_ready_seconds"
+      ],
+      "invariants": [
+        {
+          "field": "event_reasons",
+          "itemsFrom": "eventReasonAllowlist",
+          "why": "o motivo do evento vai no log, o texto do evento não"
+        }
+      ]
+    },
+    "agent_builder_a2a_test": {
+      "emitter": "cluster_api",
+      "when": "POST a2a-test e cada leitura de tasks/get",
+      "required": [
+        "event",
+        "name",
+        "caller_alias",
+        "task_id",
+        "state",
+        "has_text",
+        "duration_ms"
+      ],
+      "optional": [
+        "text_chars",
+        "http_status"
+      ],
+      "enums": {
+        "state": [
+          "submitted",
+          "working",
+          "input-required",
+          "completed",
+          "failed",
+          "canceled",
+          "rejected",
+          "unknown"
+        ]
+      },
+      "numeric": [
+        "duration_ms",
+        "text_chars",
+        "http_status"
+      ],
+      "invariants": []
+    },
+    "agent_builder_a2a_denied": {
+      "emitter": "cluster_api",
+      "when": "a2a-test recusado antes de chegar ao controller",
+      "required": [
+        "event",
+        "name",
+        "caller_alias",
+        "reason_code",
+        "http_status"
+      ],
+      "optional": [
+        "method_requested"
+      ],
+      "enums": {
+        "reason_code": [
+          "not_builder_agent",
+          "not_owner",
+          "agent_not_ready",
+          "agent_disabled",
+          "method_not_allowed",
+          "path_not_allowed",
+          "feature_disabled"
+        ]
+      },
+      "numeric": [
+        "http_status"
+      ],
+      "invariants": []
+    },
+    "agent_builder_rollback": {
+      "emitter": "cluster_api",
+      "when": "o portal confirma um nível de rollback do contrato da seção 8",
+      "required": [
+        "event",
+        "name",
+        "caller_alias",
+        "level",
+        "outcome"
+      ],
+      "optional": [
+        "request_id",
+        "mr_iid",
+        "generation"
+      ],
+      "enums": {
+        "level": [
+          "L0",
+          "L1",
+          "L2",
+          "L2_undo",
+          "L3"
+        ],
+        "outcome": [
+          "requested",
+          "converged",
+          "refused",
+          "stalled"
+        ]
+      },
+      "numeric": [
+        "mr_iid",
+        "generation"
+      ],
+      "invariants": []
+    }
+  },
+  "eventReasonAllowlist": [
+    "BackOff",
+    "Created",
+    "Evicted",
+    "FailedCreate",
+    "FailedMount",
+    "FailedScheduling",
+    "Failed",
+    "Killing",
+    "OOMKilling",
+    "Pulling",
+    "Pulled",
+    "Scheduled",
+    "Started",
+    "SuccessfulCreate",
+    "Unhealthy"
+  ],
+  "metrics": {
+    "agent_builder_requests_total": {
+      "from": "agent_builder_request_created",
+      "type": "counter",
+      "by": [
+        "op"
+      ]
+    },
+    "agent_builder_request_failures_total": {
+      "from": "agent_builder_request_failed",
+      "type": "counter",
+      "by": [
+        "reason_code"
+      ]
+    },
+    "agent_builder_drafts_total": {
+      "from": "agent_builder_draft_generated",
+      "type": "counter",
+      "by": [
+        "outcome"
+      ]
+    },
+    "agent_builder_phase_total": {
+      "from": "agent_builder_agent_observed",
+      "type": "counter",
+      "by": [
+        "phase",
+        "cause"
+      ]
+    },
+    "agent_builder_a2a_tests_total": {
+      "from": "agent_builder_a2a_test",
+      "type": "counter",
+      "by": [
+        "state"
+      ]
+    },
+    "agent_builder_a2a_denied_total": {
+      "from": "agent_builder_a2a_denied",
+      "type": "counter",
+      "by": [
+        "reason_code"
+      ]
+    },
+    "agent_builder_time_to_ready_seconds": {
+      "from": "agent_builder_agent_observed",
+      "type": "histogram",
+      "value": "time_to_ready_seconds",
+      "when": {
+        "phase": "READY"
+      }
+    },
+    "agent_builder_a2a_duration_ms": {
+      "from": "agent_builder_a2a_test",
+      "type": "histogram",
+      "value": "duration_ms",
+      "when": {
+        "state": "completed"
+      }
+    }
+  }
+}

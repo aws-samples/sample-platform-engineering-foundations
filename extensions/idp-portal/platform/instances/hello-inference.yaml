@@ -1,0 +1,18 @@
+apiVersion: kro.run/v1alpha1
+kind: InferenceEKS
+metadata:
+  labels:
+    platform.appmod/owner: platform-team
+  name: hello-inference
+  namespace: appmod
+spec:
+  name: hello-inference
+  environment: lab
+  image: public.ecr.aws/nginx/nginx-unprivileged:stable-alpine
+  containerPort: 8080
+  healthPath: /
+  modelId: demo-echo
+  cpu: "250m"
+  memory: "256Mi"
+  minReplicas: 1
+  maxReplicas: 3

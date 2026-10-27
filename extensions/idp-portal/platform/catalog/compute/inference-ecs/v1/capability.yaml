@@ -1,0 +1,24 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: inference-ecs
+  domain: compute
+  version: v1
+spec:
+  displayName: Model inference on ECS Fargate
+  displayNamePt: Inference de modelo no ECS Fargate
+  description: Same contract as inference-eks, on ECS Fargate (Graviton, private subnets, no public IP, circuit breaker, CloudWatch logs). PREVIEW - blocked by a measured ACK gap (see ackGap).
+  descriptionPt: Mesmo contrato da inference-eks, no ECS Fargate (Graviton, subnets privadas, sem IP público, circuit breaker, logs no CloudWatch). PREVIEW - bloqueada por ackGap medido.
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/inference-ecs-rgd.yaml
+  goldenPath: GP-B
+  ackGap: "ACK ECS TaskDefinition (EKS Capability 46.137.1) re-registers a new revision on every reconcile (934 revisions in ~25 min, reproduced twice, with and without explicit hostPort/ordered env), pushing a new Service deployment each time. Controller is Capability-managed, so its delta logs are not readable in-cluster. Track in ACK ecs-controller issues; re-measure on next Capability version before enabling."
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

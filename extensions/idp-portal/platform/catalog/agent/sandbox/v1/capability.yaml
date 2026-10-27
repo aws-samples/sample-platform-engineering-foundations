@@ -1,0 +1,19 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: sandbox
+  domain: agent
+  version: v1
+spec:
+  displayName: Sandboxed agent
+  displayNamePt: Agent em sandbox
+  description: Stateful isolated runtime for generated code and sessions.
+  descriptionPt: Runtime stateful isolado para código gerado e sessões.
+  owner: platform-team
+  engine: kro
+  pattern: Agent Sandbox
+  lifecycle: planned
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  goldenPath: GP-G3
+  relations: {requires: [], composes: []}

@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: inference-eks
+  domain: compute
+  version: v1
+spec:
+  displayName: Model inference on EKS
+  displayNamePt: Inference de modelo no EKS
+  description: Hardened inference service on the platform cluster - Deployment (non-root, read-only rootfs, no caps), private Service, HPA, PDB and NetworkPolicy. CPU by default; GPU via nodePool.
+  descriptionPt: Serviço de inference hardened no cluster da plataforma - Deployment (non-root, rootfs read-only, sem caps), Service privado, HPA, PDB e NetworkPolicy. CPU por default; GPU via nodePool.
+  owner: platform-team
+  engine: kro
+  pattern: kro (Kubernetes nativo)
+  lifecycle: available
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/inference-eks-rgd.yaml
+  goldenPath: GP-B
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: Available

@@ -1,0 +1,5 @@
+{"$schema":"http://json-schema.org/draft-07/schema#","title":"ServerlessMultiTier","type":"object","required":["name","s3Bucket","bucketSuffix"],
+ "properties":{"name":{"type":"string"},"s3Bucket":{"type":"string"},
+ "s3Key":{"type":"string","default":"function-python-users-posts.zip"},
+ "size":{"type":"string","enum":["small","medium","large","xlarge"],"default":"medium"},
+ "environment":{"type":"string","default":"dev"},"bucketSuffix":{"type":"string"}},"additionalProperties":false}

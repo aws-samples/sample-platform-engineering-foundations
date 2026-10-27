@@ -1,0 +1,10 @@
+apiVersion: kro.run/v1alpha1
+kind: StaticSite
+metadata:
+  labels:
+    platform.appmod/owner: platform-team
+  name: hello-site
+  namespace: appmod
+spec:
+  name: appmod-hello-site-111122223333
+  environment: lab

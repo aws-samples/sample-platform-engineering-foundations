@@ -1,0 +1,10 @@
+{"$schema":"http://json-schema.org/draft-07/schema#","title":"LambdaFunction","type":"object","required":["name","s3Bucket","s3Key","roleArn"],
+ "properties":{"name":{"type":"string","pattern":"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+ "s3Bucket":{"type":"string"},"s3Key":{"type":"string"},
+ "handler":{"type":"string","default":"main.lambda_handler"},
+ "runtime":{"type":"string","enum":["python3.12","python3.13","nodejs22.x"],"default":"python3.12"},
+ "size":{"type":"string","enum":["small","medium","large","xlarge"],"default":"medium","description":"small=256MB medium=1024MB large=2048MB xlarge=4096MB"},
+ "timeout":{"type":"integer","minimum":3,"maximum":900,"default":30},
+ "roleArn":{"type":"string","pattern":"^arn:aws:iam::"},
+ "environmentVariables":{"type":"object","additionalProperties":{"type":"string"}},
+ "environment":{"type":"string","default":"dev"}},"additionalProperties":false}

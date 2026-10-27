@@ -1,0 +1,7 @@
+.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.auto.tfvars
+.spa-build.env

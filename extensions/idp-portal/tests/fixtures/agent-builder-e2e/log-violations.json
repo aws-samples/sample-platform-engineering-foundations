@@ -1,0 +1,107 @@
+{
+  "description": "Controle pareado do validador de sinais. Cada caso é uma linha de log que DEVE ser reprovada, com um trecho do achado esperado. Sem estes casos o validador poderia aceitar tudo e continuar verde, que foi o modo de falha do guarda-corpo autoavaliado.",
+  "cases": [
+    {
+      "id": "prompt-no-log",
+      "why": "texto do prompt no log",
+      "line": {"event": "agent_builder_draft_generated", "request_id": "a1", "caller_alias": "platform-admin", "outcome": "ok", "duration_ms": 900, "prompt_chars": 20, "tools_offered": 0, "prompt": "Crie um agent que leia os pods do namespace appmod"},
+      "expectFindingContains": "campo proibido: prompt"
+    },
+    {
+      "id": "prompt-em-camel-case",
+      "why": "o mesmo vazamento com outro nome de campo",
+      "line": {"event": "agent_builder_draft_generated", "request_id": "a1", "caller_alias": "platform-admin", "outcome": "ok", "duration_ms": 900, "prompt_chars": 20, "tools_offered": 0, "promptText": "Crie um agent"},
+      "expectFindingContains": "campo contém 'prompt' sem ser medida: promptText"
+    },
+    {
+      "id": "tool-oferecida-ao-modelo",
+      "why": "I1: o modelo não recebe tool nenhuma",
+      "line": {"event": "agent_builder_draft_generated", "request_id": "a1", "caller_alias": "platform-admin", "outcome": "ok", "duration_ms": 900, "prompt_chars": 20, "tools_offered": 2},
+      "expectFindingContains": "tools_offered: deveria ser 0"
+    },
+    {
+      "id": "resposta-a2a-no-log",
+      "why": "o texto que o agent respondeu é conteúdo, não medida",
+      "line": {"event": "agent_builder_a2a_test", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "task_id": "t-1", "state": "completed", "has_text": true, "duration_ms": 100, "text": "Sou o agent de saude dos pods"},
+      "expectFindingContains": "campo proibido: text"
+    },
+    {
+      "id": "mensagem-de-evento-no-log",
+      "why": "do evento do Kubernetes sai o reason, nunca a message",
+      "line": {"event": "agent_builder_agent_observed", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "phase": "STARTING", "cause": "CONFIG_MISSING", "generation": 1, "observed_generation": 1, "argo_tracked": true, "age_seconds": 60, "fresh": true, "event_reasons": ["MountVolume.SetUp failed for volume config: configmap ab-fx-r1a2b3-config not found"]},
+      "expectFindingContains": "itens fora da allowlist"
+    },
+    {
+      "id": "chave-de-acesso-no-valor",
+      "why": "credencial no corpo do log",
+      "line": {"event": "agent_builder_a2a_denied", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "reason_code": "method_not_allowed", "http_status": 400, "method_requested": "agents/create AKIAIOSFODNN7EXAMPLE"},
+      "expectFindingContains": "padrão proibido aws-access-key-id"
+    },
+    {
+      "id": "bearer-no-valor",
+      "why": "header de autorização copiado",
+      "line": {"event": "agent_builder_draft_rejected", "request_id": "a1", "caller_alias": "platform-admin", "error_count": 1, "first_error_path": "Bearer abcdefghijklmnopqrstuvwxyz0123", "first_error_code": "type"},
+      "expectFindingContains": "padrão proibido bearer-token"
+    },
+    {
+      "id": "jwt-no-valor",
+      "why": "token assinado de sessão",
+      "line": {"event": "agent_builder_preview_rendered", "request_id": "a1", "caller_alias": "platform-admin", "draft_sha256": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc", "manifest_bytes": 10, "tool_count": 1},
+      "expectFindingContains": "padrão proibido jwt"
+    },
+    {
+      "id": "evento-do-builder-fora-do-contrato",
+      "why": "evento novo com o prefixo do builder tem de entrar no contrato antes de ser emitido",
+      "line": {"event": "agent_builder_debug_dump", "name": "ab-fx-r1a2b3"},
+      "expectFindingContains": "fora do contrato"
+    },
+    {
+      "id": "campo-fora-do-contrato",
+      "why": "campo novo em evento conhecido é desvio de contrato",
+      "line": {"event": "agent_builder_a2a_test", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "task_id": "t-1", "state": "completed", "has_text": true, "duration_ms": 100, "controller_url": "http://kagent-controller:8083"},
+      "expectFindingContains": "campo fora do contrato: controller_url"
+    },
+    {
+      "id": "enum-invalido",
+      "why": "estado de task que o contrato não conhece",
+      "line": {"event": "agent_builder_a2a_test", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "task_id": "t-1", "state": "done", "has_text": true, "duration_ms": 100},
+      "expectFindingContains": "fora do enum"
+    },
+    {
+      "id": "fase-invalida",
+      "why": "fase fora das 14 do contrato",
+      "line": {"event": "agent_builder_agent_observed", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "phase": "GREEN", "cause": "NONE", "generation": 1, "observed_generation": 1, "argo_tracked": true, "age_seconds": 60, "fresh": true},
+      "expectFindingContains": "phase: valor fora do enum"
+    },
+    {
+      "id": "campo-obrigatorio-ausente",
+      "why": "sem fresh a UI não sabe se pode mostrar verde",
+      "line": {"event": "agent_builder_agent_observed", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "phase": "READY", "cause": "NONE", "generation": 1, "observed_generation": 1, "argo_tracked": true, "age_seconds": 60},
+      "expectFindingContains": "campo obrigatório ausente: fresh"
+    },
+    {
+      "id": "numero-como-texto",
+      "why": "duração em texto quebra a métrica derivada em silencio",
+      "line": {"event": "agent_builder_a2a_test", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "task_id": "t-1", "state": "completed", "has_text": true, "duration_ms": "6400"},
+      "expectFindingContains": "deveria ser número"
+    },
+    {
+      "id": "valor-longo-demais",
+      "why": "campo curto virando despejo de texto",
+      "line": {"event": "agent_builder_agent_observed", "name": "ab-fx-r1a2b3", "caller_alias": "platform-admin", "phase": "READY", "cause": "NONE", "generation": 1, "observed_generation": 1, "argo_tracked": true, "age_seconds": 60, "fresh": true, "ready_reason": "AgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailableAgentAvailable"},
+      "expectFindingContains": "limite 300"
+    },
+    {
+      "id": "vazamento-em-evento-legado",
+      "why": "a redação vale para toda linha, não só para evento do builder",
+      "line": {"event": "platform_api_request", "method": "POST", "path": "/platform/agent-drafts/preview", "alias": "platform-admin", "prompt": "Crie um agent"},
+      "expectFindingContains": "campo proibido: prompt"
+    },
+    {
+      "id": "linha-sem-evento",
+      "why": "linha de log sem a chave que identifica o evento",
+      "line": {"name": "ab-fx-r1a2b3", "phase": "READY"},
+      "expectFindingContains": "linha sem a chave 'event'"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Standalone example: any team can consume the building block on its own
+apiVersion: kro.run/v1alpha1
+kind: DynamoDBTable
+metadata:
+  name: sample-table
+spec:
+  name: sample-table
+  hashKeyName: id
+  hashKeyType: N
+  environment: dev

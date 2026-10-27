@@ -1,0 +1,4 @@
+.dashboard-board {
+  display: grid;
+  gap: var(--awsui-space-scaled-l, 20px);
+}

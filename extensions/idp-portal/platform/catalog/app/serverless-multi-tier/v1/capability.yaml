@@ -1,0 +1,23 @@
+apiVersion: platform.appmod/v1
+kind: Capability
+metadata:
+  name: serverless-multi-tier
+  domain: app
+  version: v1
+spec:
+  displayName: Serverless multi-tier app
+  displayNamePt: App serverless multi-tier
+  description: "Nested graph: 2 DynamoDB tables, Lambda, WebAPI, static site and glue IAM."
+  descriptionPt: "Grafo aninhado: 2 tabelas DynamoDB, Lambda, WebAPI, site estático e IAM."
+  owner: platform-team
+  engine: ack
+  pattern: kro + ACK
+  lifecycle: preview
+  deletionPolicy: retain
+  targetAccounts: ["111122223333"]
+  rgdRef: platform/compositions/serverless-multi-tier-rgd.yaml
+  goldenPath: GP-A1
+  relations: {requires: [], composes: []}
+  status:
+    argoApplication: agent-platform-instances
+    readyCondition: ACK.ResourceSynced

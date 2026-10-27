@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "service-draft/v1",
+  "domain": "database",
+  "name": "orders-table",
+  "version": "v1",
+  "displayName": "Orders table",
+  "displayNamePt": "Tabela de pedidos",
+  "description": "DynamoDB table for order events, retained on deletion.",
+  "descriptionPt": "Tabela DynamoDB para eventos de pedido, retida na exclusão.",
+  "owner": "platform-team",
+  "engine": "ack",
+  "pattern": "kro + ACK DynamoDB",
+  "lifecycle": "preview",
+  "goldenPath": "GP-I2",
+  "rgdRef": "platform/compositions/dynamodb-table-rgd.yaml",
+  "fields": [
+    {"name": "name", "type": "string", "title": "Table name", "description": "Lowercase DNS label.", "required": true, "example": "orders"},
+    {"name": "hashKeyName", "type": "string", "title": "Partition key", "default": "id"},
+    {"name": "hashKeyType", "type": "string", "title": "Partition key type", "enum": ["S", "N"], "default": "N"},
+    {"name": "environment", "type": "string", "title": "Environment", "enum": ["dev", "internal", "prod"], "default": "dev"}
+  ],
+  "docs": {
+    "overview": "One table per bounded context. The platform retains the table when the instance is deleted.",
+    "usage": "Request it from the catalog, then read the table ARN from the instance status."
+  }
+}

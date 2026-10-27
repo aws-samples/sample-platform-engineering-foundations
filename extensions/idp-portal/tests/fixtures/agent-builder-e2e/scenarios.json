@@ -1,0 +1,755 @@
+{
+  "description": "Cenários e2e do Agent Builder em payload realista da cluster-api (seções 5.6 e 5.7), com a fase esperada pelas regras da seção 6.2, a causa classificada, o frescor da leitura e o sinal estruturado de cada passo. Complementa tests/fixtures/agent-builder/phase-cases.json, que cobre as 11 regras em forma abstrata: aqui cada passo é um estado que o cluster produz de verdade. A fase nunca é redefinida neste arquivo; ela é derivada das regras do W0 e conferida por um oráculo de teste que reproduz os 30 casos golden.",
+  "budgetSeconds": 900,
+  "eventWindowSeconds": 900,
+  "staleReadSeconds": 60,
+  "runId": "r1a2b3",
+  "requestId": "0123456789abcdef0123456789abcdef",
+  "fixtureName": "ab-fx-r1a2b3",
+  "coverage": [
+    "ImagePullBackOff",
+    "ConfigMap ausente",
+    "OOMKilled",
+    "draft proibido",
+    "nome duplicado",
+    "submissões concorrentes",
+    "transição Ready",
+    "resposta A2A",
+    "revert do Git e limpeza"
+  ],
+  "scenarios": [
+    {
+      "id": "image-pull-backoff",
+      "covers": "ImagePullBackOff",
+      "layer": "cluster",
+      "story": "O MR entrou, o Argo aplicou o Agent, e o pod do runtime não consegue baixar a imagem. O portal mostra STARTING dentro do prazo e STALLED depois, sempre com a causa IMAGE_PULL, nunca um verde falso.",
+      "steps": [
+        {
+          "id": "sync-pending",
+          "at": 1760400030,
+          "observedAt": 1760400030,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Progressing", "health": "Progressing", "revision": "9f1c2d3"},
+          "expected": {"phase": "SYNCING", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "pull-failing-inside-budget",
+          "at": 1760400120,
+          "observedAt": 1760400120,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainerNotReady", "message": "containers with unready status: [agent]"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Scheduled", "message": "Successfully assigned kagent/ab-fx-r1a2b3-7f4c to ip-10-0-2-31", "count": 1, "lastTimestamp": 1760400065},
+            {"type": "Normal", "reason": "Pulling", "message": "Pulling image \"ghcr.io/kagent-dev/kagent/app:0.9.9\"", "count": 2, "lastTimestamp": 1760400070},
+            {"type": "Warning", "reason": "Failed", "message": "Failed to pull image \"ghcr.io/kagent-dev/kagent/app:0.9.9\": not found: manifest unknown", "count": 2, "lastTimestamp": 1760400095},
+            {"type": "Warning", "reason": "BackOff", "message": "Back-off pulling image \"ghcr.io/kagent-dev/kagent/app:0.9.9\"", "count": 3, "lastTimestamp": 1760400110}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Degraded", "revision": "9f1c2d3"},
+          "expected": {"phase": "STARTING", "cause": "IMAGE_PULL", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.imagePull"}
+        },
+        {
+          "id": "pull-failing-past-budget",
+          "at": 1760400950,
+          "observedAt": 1760400950,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainerNotReady", "message": "containers with unready status: [agent]"}
+          },
+          "events": [
+            {"type": "Warning", "reason": "Failed", "message": "Failed to pull image \"ghcr.io/kagent-dev/kagent/app:0.9.9\": not found: manifest unknown", "count": 11, "lastTimestamp": 1760400880},
+            {"type": "Warning", "reason": "BackOff", "message": "Back-off pulling image \"ghcr.io/kagent-dev/kagent/app:0.9.9\"", "count": 12, "lastTimestamp": 1760400900}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Degraded", "revision": "9f1c2d3"},
+          "expected": {"phase": "STALLED", "cause": "IMAGE_PULL", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.imagePull"}
+        }
+      ]
+    },
+    {
+      "id": "configmap-missing",
+      "covers": "ConfigMap ausente",
+      "layer": "cluster",
+      "story": "O Agent foi aceito, mas o volume de configuração aponta para um ConfigMap que não existe. A causa separa esse caso do ImagePullBackOff, porque a ação do usuário é outra.",
+      "steps": [
+        {
+          "id": "mount-failing-inside-budget",
+          "at": 1760400200,
+          "observedAt": 1760400200,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainersNotInitialized", "message": "containers with incomplete status: [init]"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Scheduled", "message": "Successfully assigned kagent/ab-fx-r1a2b3-7f4c to ip-10-0-2-31", "count": 1, "lastTimestamp": 1760400065},
+            {"type": "Warning", "reason": "FailedMount", "message": "MountVolume.SetUp failed for volume \"config\": configmap \"ab-fx-r1a2b3-config\" not found", "count": 4, "lastTimestamp": 1760400150}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Progressing", "revision": "9f1c2d3"},
+          "expected": {"phase": "STARTING", "cause": "CONFIG_MISSING", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.configMissing"}
+        },
+        {
+          "id": "mount-failing-past-budget",
+          "at": 1760401010,
+          "observedAt": 1760401010,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainersNotInitialized", "message": "containers with incomplete status: [init]"}
+          },
+          "events": [
+            {"type": "Warning", "reason": "FailedMount", "message": "MountVolume.SetUp failed for volume \"config\": configmap \"ab-fx-r1a2b3-config\" not found", "count": 30, "lastTimestamp": 1760400980}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Degraded", "revision": "9f1c2d3"},
+          "expected": {"phase": "STALLED", "cause": "CONFIG_MISSING", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.configMissing"}
+        }
+      ]
+    },
+    {
+      "id": "oom-killed",
+      "covers": "OOMKilled",
+      "layer": "cluster",
+      "story": "O runtime declarativo estoura o limite de 1Gi. O último passo é o par de frescor: o mesmo evento de OOM dentro da janela gera aviso, e fora da janela não gera, para que um agent saudável não fique marcado para sempre.",
+      "steps": [
+        {
+          "id": "oom-inside-budget",
+          "at": 1760400300,
+          "observedAt": 1760400300,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainerNotReady", "message": "containers with unready status: [agent]"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Started", "message": "Started container agent", "count": 3, "lastTimestamp": 1760400100},
+            {"type": "Warning", "reason": "OOMKilling", "message": "Memory cgroup out of memory: Killed process 1 (python3) total-vm:2101248kB", "count": 3, "lastTimestamp": 1760400240},
+            {"type": "Warning", "reason": "BackOff", "message": "Back-off restarting failed container agent in pod ab-fx-r1a2b3-7f4c", "count": 4, "lastTimestamp": 1760400280}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Degraded", "revision": "9f1c2d3"},
+          "expected": {"phase": "STARTING", "cause": "OOM_KILLED", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.oomKilled"}
+        },
+        {
+          "id": "oom-past-budget",
+          "at": 1760401250,
+          "observedAt": 1760401250,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainerNotReady", "message": "containers with unready status: [agent]"}
+          },
+          "events": [
+            {"type": "Warning", "reason": "OOMKilling", "message": "Memory cgroup out of memory: Killed process 1 (python3) total-vm:2101248kB", "count": 9, "lastTimestamp": 1760401200},
+            {"type": "Warning", "reason": "BackOff", "message": "Back-off restarting failed container agent in pod ab-fx-r1a2b3-7f4c", "count": 14, "lastTimestamp": 1760401230}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Degraded", "revision": "9f1c2d3"},
+          "expected": {"phase": "STALLED", "cause": "OOM_KILLED", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.oomKilled"}
+        },
+        {
+          "id": "ready-but-oom-event-still-fresh",
+          "at": 1760401500,
+          "observedAt": 1760401500,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [
+            {"type": "Warning", "reason": "OOMKilling", "message": "Memory cgroup out of memory: Killed process 1 (python3) total-vm:2101248kB", "count": 9, "lastTimestamp": 1760401460}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "OOM_KILLED", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.cause.oomKilled"}
+        },
+        {
+          "id": "ready-and-oom-event-out-of-window",
+          "at": 1760403000,
+          "observedAt": 1760403000,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [
+            {"type": "Warning", "reason": "OOMKilling", "message": "Memory cgroup out of memory: Killed process 1 (python3) total-vm:2101248kB", "count": 9, "lastTimestamp": 1760401460}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        }
+      ]
+    },
+    {
+      "id": "forbidden-draft",
+      "covers": "draft proibido",
+      "layer": "platform-api",
+      "story": "O draft com tool de escrita, com prefixo reservado ou com segredo no texto para na validação: responde 422, não cria pedido, não cria agent. Os casos são referências a tests/fixtures/agent-builder/invalid-drafts.json, para que exista uma única fonte do par (path, code).",
+      "steps": [
+        {
+          "id": "write-tool-refused",
+          "at": 1760400000,
+          "observedAt": 1760400000,
+          "op": "create",
+          "request": null,
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "w0CaseId": "write-tool",
+          "expected": {"phase": "NOT_FOUND", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.toolNotAllowed", "httpStatus": 422, "requestCreated": false}
+        },
+        {
+          "id": "fixture-prefix-refused-for-non-admin",
+          "at": 1760400000,
+          "observedAt": 1760400000,
+          "op": "create",
+          "request": null,
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "w0CaseId": "fixture-prefix-non-admin",
+          "expected": {"phase": "NOT_FOUND", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.reservedName", "httpStatus": 422, "requestCreated": false}
+        },
+        {
+          "id": "secret-in-instruction-refused",
+          "at": 1760400000,
+          "observedAt": 1760400000,
+          "op": "create",
+          "request": null,
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "w0CaseId": "token-in-instruction",
+          "expected": {"phase": "NOT_FOUND", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.secretLike", "httpStatus": 422, "requestCreated": false}
+        }
+      ]
+    },
+    {
+      "id": "duplicate-name",
+      "covers": "nome duplicado",
+      "layer": "ci",
+      "story": "O nome passa na validação porque o arquivo só existe em main. O CI recusa no momento de abrir o MR, e o portal mostra FAILED com o motivo, não um pedido pendurado.",
+      "steps": [
+        {
+          "id": "claimed",
+          "at": 1760400020,
+          "observedAt": 1760400020,
+          "op": "create",
+          "request": {"status": "processing", "mergedAt": null, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "REQUESTED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "refused-already-exists",
+          "at": 1760400040,
+          "observedAt": 1760400040,
+          "op": "create",
+          "request": {"status": "failed", "mergedAt": null, "reasonCode": "already_exists"},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.alreadyExists"}
+        }
+      ]
+    },
+    {
+      "id": "concurrent-submissions",
+      "covers": "submissões concorrentes",
+      "layer": "ci",
+      "story": "Dois pedidos do mesmo nome na mesma janela, mais o quarto agent ativo do mesmo requester e uma claim perdida. Exatamente um caminho chega ao MR; os outros terminam FAILED com motivo próprio, e nenhum fica em REQUESTED para sempre.",
+      "steps": [
+        {
+          "id": "winner-pending",
+          "track": "A",
+          "at": 1760400010,
+          "observedAt": 1760400010,
+          "op": "create",
+          "request": {"status": "pending", "mergedAt": null, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "REQUESTED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "loser-pending",
+          "track": "B",
+          "at": 1760400011,
+          "observedAt": 1760400011,
+          "op": "create",
+          "request": {"status": "pending", "mergedAt": null, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "REQUESTED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "winner-mr-open",
+          "track": "A",
+          "at": 1760400030,
+          "observedAt": 1760400030,
+          "op": "create",
+          "request": {"status": "mr_open", "mergedAt": null, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "IN_REVIEW", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "loser-already-exists",
+          "track": "B",
+          "at": 1760400031,
+          "observedAt": 1760400031,
+          "op": "create",
+          "request": {"status": "failed", "mergedAt": null, "reasonCode": "already_exists"},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.alreadyExists"}
+        },
+        {
+          "id": "fourth-active-agent-refused",
+          "track": "C",
+          "at": 1760400035,
+          "observedAt": 1760400035,
+          "op": "create",
+          "request": {"status": "failed", "mergedAt": null, "reasonCode": "limit_active_per_requester"},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.limitActivePerRequester"}
+        },
+        {
+          "id": "claim-lost",
+          "track": "D",
+          "at": 1760400036,
+          "observedAt": 1760400036,
+          "op": "create",
+          "request": {"status": "failed", "mergedAt": null, "reasonCode": "claim_lost"},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.error.claimLost"}
+        }
+      ]
+    },
+    {
+      "id": "ready-transition",
+      "covers": "transição Ready",
+      "layer": "cluster",
+      "story": "O caminho feliz, mais os dois modos de verde falso: generation a frente da observedGeneration, e leitura velha. Nos dois o frescor reprova, mesmo quando a fase é READY.",
+      "steps": [
+        {
+          "id": "syncing",
+          "at": 1760400040,
+          "observedAt": 1760400040,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Progressing", "health": "Progressing", "revision": "9f1c2d3"},
+          "expected": {"phase": "SYNCING", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "starting-no-events",
+          "at": 1760400150,
+          "observedAt": 1760400150,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "ContainerNotReady", "message": "containers with unready status: [agent]"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Pulled", "message": "Successfully pulled image \"ghcr.io/kagent-dev/kagent/app:0.9.9\"", "count": 1, "lastTimestamp": 1760400140}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Progressing", "revision": "9f1c2d3"},
+          "expected": {"phase": "STARTING", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "ready",
+          "at": 1760400300,
+          "observedAt": 1760400300,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Started", "message": "Started container agent", "count": 1, "lastTimestamp": 1760400160}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null, "timeToReadySeconds": 300}
+        },
+        {
+          "id": "verified-after-a2a",
+          "at": 1760400320,
+          "observedAt": 1760400320,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "completed", "hasText": true, "textChars": 142, "taskId": "t-9c1f2a44", "durationMs": 4120},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "VERIFIED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "generation-ahead-of-observed",
+          "at": 1760400400,
+          "observedAt": 1760400400,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 2, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "STARTING", "cause": "NONE", "fresh": false, "staleReasons": ["GENERATION_LAG"], "warn": true, "remediationKey": "agentBuilder.fresh.generationLag"}
+        },
+        {
+          "id": "stale-read-shows-no-green",
+          "at": 1760400500,
+          "observedAt": 1760400300,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": false, "staleReasons": ["STALE_READ"], "warn": true, "remediationKey": "agentBuilder.fresh.staleRead"}
+        },
+        {
+          "id": "argo-unreadable-and-untracked",
+          "at": 1760400600,
+          "observedAt": 1760400600,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": false,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Unknown", "health": "Unknown", "revision": "Unknown"},
+          "expected": {"phase": "READY", "cause": "NOT_TRACKED_BY_ARGO", "fresh": false, "staleReasons": ["ARGO_UNKNOWN"], "warn": true, "remediationKey": "agentBuilder.cause.notTrackedByArgo"}
+        }
+      ]
+    },
+    {
+      "id": "a2a-response",
+      "covers": "resposta A2A",
+      "layer": "cluster",
+      "story": "O mesmo agent pronto com todos os desfechos do teste A2A. Texto vazio é tratado como falha do teste, não como sucesso, porque o usuário precisa saber que o agent não respondeu nada.",
+      "steps": [
+        {
+          "id": "submitted",
+          "at": 1760400600,
+          "observedAt": 1760400600,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "submitted", "hasText": false, "textChars": 0, "taskId": "t-1b2c3d4e", "durationMs": 180},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "working",
+          "at": 1760400605,
+          "observedAt": 1760400605,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "working", "hasText": false, "textChars": 0, "taskId": "t-1b2c3d4e", "durationMs": 5200},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "completed-with-text",
+          "at": 1760400610,
+          "observedAt": 1760400610,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "completed", "hasText": true, "textChars": 142, "taskId": "t-1b2c3d4e", "durationMs": 6400},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "VERIFIED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "completed-without-text",
+          "at": 1760400611,
+          "observedAt": 1760400611,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "completed", "hasText": false, "textChars": 0, "taskId": "t-1b2c3d4e", "durationMs": 6400},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "TEST_FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.a2a.noText"}
+        },
+        {
+          "id": "failed",
+          "at": 1760400612,
+          "observedAt": 1760400612,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "failed", "hasText": false, "textChars": 0, "taskId": "t-1b2c3d4e", "durationMs": 2100},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "TEST_FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.a2a.failed"}
+        },
+        {
+          "id": "canceled",
+          "at": 1760400613,
+          "observedAt": 1760400613,
+          "op": "create",
+          "request": {"status": "merged", "mergedAt": 1760400000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": {"state": "canceled", "hasText": false, "textChars": 0, "taskId": "t-1b2c3d4e", "durationMs": 20000},
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "9f1c2d3"},
+          "expected": {"phase": "TEST_FAILED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": true, "remediationKey": "agentBuilder.a2a.failed"}
+        }
+      ]
+    },
+    {
+      "id": "git-revert-cleanup",
+      "covers": "revert do Git e limpeza",
+      "layer": "gitops",
+      "story": "L2 desativa pelo MR, o teste A2A passa a responder 409, o revert do MR devolve o agent a READY e a remoção L3 deixa NotFound. A guarda de fixture é conferida nos dois sentidos: permite no objeto deste run e recusa em qualquer outro.",
+      "steps": [
+        {
+          "id": "disable-merged-not-applied-yet",
+          "at": 1760405030,
+          "observedAt": 1760405030,
+          "op": "disable",
+          "request": {"status": "merged", "mergedAt": 1760405000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Progressing", "health": "Healthy", "revision": "7a0b1c2"},
+          "expected": {"phase": "SYNCING", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "disabled",
+          "at": 1760405200,
+          "observedAt": 1760405200,
+          "op": "disable",
+          "request": {"status": "merged", "mergedAt": 1760405000, "reasonCode": null},
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 2, "observedGeneration": 2, "replicas": 0, "podReplicas": 0, "disabled": true, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "False", "reason": "AgentDisabled", "message": "Deployment scaled to zero"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Killing", "message": "Stopping container agent", "count": 1, "lastTimestamp": 1760405120}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "7a0b1c2"},
+          "guard": {
+            "name": "ab-fx-r1a2b3",
+            "fixtureLabel": "true",
+            "requestId": "0123456789abcdef0123456789abcdef",
+            "expectedOutcome": "allow",
+            "expectedReasons": []
+          },
+          "expected": {"phase": "DISABLED", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": "agentBuilder.rollback.reactivate", "a2aPostStatus": 409}
+        },
+        {
+          "id": "reverted-back-to-ready",
+          "at": 1760406200,
+          "observedAt": 1760406200,
+          "op": "create",
+          "request": null,
+          "agent": {
+            "name": "ab-fx-r1a2b3", "displayName": "Fixture do run r1a2b3", "requester": "platform-admin",
+            "requestId": "0123456789abcdef0123456789abcdef", "createdAt": 1760400060,
+            "generation": 3, "observedGeneration": 3, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [
+            {"type": "Normal", "reason": "Started", "message": "Started container agent", "count": 2, "lastTimestamp": 1760406150}
+          ],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "4d5e6f7"},
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "removed-l3",
+          "at": 1760406800,
+          "observedAt": 1760406800,
+          "op": "create",
+          "request": null,
+          "agent": null,
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "1a2b3c4"},
+          "cleanup": {
+            "agentsWithRunId": 0,
+            "filesWithRunId": 0,
+            "openFixtureMrs": 0,
+            "dynamoItemsWithRunId": 0
+          },
+          "expected": {"phase": "NOT_FOUND", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        },
+        {
+          "id": "guard-refuses-foreign-agent",
+          "at": 1760406810,
+          "observedAt": 1760406810,
+          "op": "create",
+          "request": null,
+          "agent": {
+            "name": "ab-pod-health", "displayName": "Saude dos pods", "requester": "platform-admin",
+            "requestId": "ffffffffffffffffffffffffffffffff", "createdAt": 1760300000,
+            "generation": 1, "observedGeneration": 1, "replicas": null, "disabled": false, "argoTracked": true,
+            "accepted": {"status": "True", "reason": "AgentReconciled", "message": "Agent reconciled"},
+            "ready": {"status": "True", "reason": "AgentAvailable", "message": "Deployment has minimum availability"}
+          },
+          "events": [],
+          "a2a": null,
+          "argo": {"application": "agent-platform-agents", "sync": "Synced", "health": "Healthy", "revision": "1a2b3c4"},
+          "guard": {
+            "name": "ab-pod-health",
+            "fixtureLabel": null,
+            "requestId": "ffffffffffffffffffffffffffffffff",
+            "expectedOutcome": "refuse",
+            "expectedReasons": ["NAME_NOT_RUN_FIXTURE", "FIXTURE_LABEL_MISSING", "REQUEST_ID_MISMATCH"]
+          },
+          "expected": {"phase": "READY", "cause": "NONE", "fresh": true, "staleReasons": [], "warn": false, "remediationKey": null}
+        }
+      ]
+    }
+  ]
+}

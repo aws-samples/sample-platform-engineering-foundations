@@ -1,0 +1,317 @@
+{
+ "channel": "portal",
+ "compensation": null,
+ "compiler": "platform-assistant/v1",
+ "createdAt": 1800000005,
+ "events": [
+  {
+   "actor": {
+    "alias": "platform-admin",
+    "channel": "portal",
+    "persona": "Application Engineer",
+    "type": "human"
+   },
+   "at": 1800000005,
+   "detail": {
+    "planSha256": "ac6881a586aa7e862698b966717ababbf9b57f918c7a316278a20fee71092317",
+    "steps": [
+     "fn",
+     "api"
+    ]
+   },
+   "from": "",
+   "ref": null,
+   "seq": 0,
+   "source": "assistant",
+   "to": "",
+   "type": "plan_confirmed"
+  },
+  {
+   "actor": {
+    "identity": "platform-assistant",
+    "persona": "Catalog Agent",
+    "type": "agent"
+   },
+   "at": 1800000010,
+   "detail": {
+    "attempt": 1,
+    "path": "platform/instances/todo-fn.yaml",
+    "replayed": false,
+    "requestId": "5dcfeec9678016ca456f842d18558010"
+   },
+   "from": "planned",
+   "ref": "fn",
+   "seq": 1,
+   "source": "request",
+   "to": "submitted",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "platform-assistant",
+    "persona": "Catalog Agent",
+    "type": "agent"
+   },
+   "at": 1800000010,
+   "detail": {
+    "waitingFor": [
+     "fn"
+    ]
+   },
+   "from": "planned",
+   "ref": "api",
+   "seq": 2,
+   "source": "assistant",
+   "to": "waiting",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "open-provision-mrs",
+    "persona": "GitLab CI",
+    "type": "system"
+   },
+   "at": 1800000015,
+   "detail": {
+    "mrUrl": "https://github.com/x/-/merge_requests/1"
+   },
+   "from": "submitted",
+   "ref": "fn",
+   "seq": 3,
+   "source": "mr",
+   "to": "mr_open",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "open-provision-mrs",
+    "persona": "GitLab CI",
+    "type": "system"
+   },
+   "at": 1800000020,
+   "detail": {
+    "mrUrl": "https://github.com/x/-/merge_requests/1"
+   },
+   "from": "",
+   "ref": "fn",
+   "seq": 4,
+   "source": "mr",
+   "to": "",
+   "type": "mr_merged"
+  },
+  {
+   "actor": {
+    "identity": "cluster",
+    "persona": "Argo CD + kro",
+    "type": "system"
+   },
+   "at": 1800000020,
+   "detail": {
+    "message": "merged; waiting for Argo CD"
+   },
+   "from": "mr_open",
+   "ref": "fn",
+   "seq": 5,
+   "source": "argo",
+   "to": "syncing",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "cluster",
+    "persona": "Argo CD + kro",
+    "type": "system"
+   },
+   "at": 1800000025,
+   "detail": {
+    "argo": {
+     "health": "Healthy",
+     "sync": "Synced"
+    },
+    "reason": "ACK.ResourceSynced=False"
+   },
+   "from": "syncing",
+   "ref": "fn",
+   "seq": 6,
+   "source": "condition",
+   "to": "reconciling",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "cluster",
+    "persona": "Argo CD + kro",
+    "type": "system"
+   },
+   "at": 1800000030,
+   "detail": {
+    "argo": {
+     "health": "Healthy",
+     "sync": "Synced"
+    },
+    "readyCondition": "ACK.ResourceSynced"
+   },
+   "from": "reconciling",
+   "ref": "fn",
+   "seq": 7,
+   "source": "condition",
+   "to": "ready",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "platform-assistant",
+    "persona": "Catalog Agent",
+    "type": "agent"
+   },
+   "at": 1800000030,
+   "detail": {
+    "attempt": 1,
+    "path": "platform/instances/todo-api.yaml",
+    "replayed": false,
+    "requestId": "89028ede702e40948fcd3deae85e5577"
+   },
+   "from": "waiting",
+   "ref": "api",
+   "seq": 8,
+   "source": "request",
+   "to": "submitted",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "open-provision-mrs",
+    "persona": "GitLab CI",
+    "type": "system"
+   },
+   "at": 1800000035,
+   "detail": {
+    "code": "request_failed",
+    "message": "platform/instances/todo-api.yaml already exists on main"
+   },
+   "from": "submitted",
+   "ref": "api",
+   "seq": 9,
+   "source": "request",
+   "to": "failed",
+   "type": "step_state"
+  },
+  {
+   "actor": {
+    "identity": "platform-assistant",
+    "persona": "Catalog Agent",
+    "type": "agent"
+   },
+   "at": 1800000035,
+   "detail": {},
+   "from": "running",
+   "ref": null,
+   "seq": 10,
+   "source": "assistant",
+   "to": "partial",
+   "type": "plan_state"
+  }
+ ],
+ "idempotencyKey": "todo-app-0001",
+ "namespace": "appmod",
+ "order": [
+  "fn",
+  "api"
+ ],
+ "persona": "Application Engineer",
+ "plan": {
+  "items": [
+   {
+    "capability": "compute/lambda/v1",
+    "dependsOn": [],
+    "inputs": {
+     "environment": "dev",
+     "environmentVariables": {
+      "APP": "todo"
+     },
+     "handler": "main.lambda_handler",
+     "name": "todo-fn",
+     "roleArn": "arn:aws:iam::111122223333:role/todo-fn",
+     "runtime": "python3.12",
+     "s3Bucket": "appmod-artifacts-111122223333",
+     "s3Key": "todo-app/fn.zip",
+     "size": "medium",
+     "timeout": 30
+    },
+    "name": "todo-fn",
+    "ref": "fn"
+   },
+   {
+    "capability": "entrypoint/http-api/v1",
+    "dependsOn": [
+     "fn"
+    ],
+    "inputs": {
+     "environment": "dev",
+     "name": "todo-api",
+     "targetFunctionArn": {
+      "fromRef": "fn",
+      "output": "functionArn"
+     }
+    },
+    "name": "todo-api",
+    "ref": "api"
+   }
+  ],
+  "schemaVersion": "provision-plan/v1",
+  "summary": "Function and HTTP API for the todo-app"
+ },
+ "planId": "4c5c329f0c6f04f19c903ad99ea02c52",
+ "planSha256": "ac6881a586aa7e862698b966717ababbf9b57f918c7a316278a20fee71092317",
+ "project": "todo-app",
+ "requester": "platform-admin",
+ "state": "partial",
+ "steps": {
+  "api": {
+   "attempt": 1,
+   "createdByPlan": false,
+   "error": "platform/instances/todo-api.yaml already exists on main",
+   "lastDetail": {
+    "code": "request_failed",
+    "message": "platform/instances/todo-api.yaml already exists on main"
+   },
+   "mrUrl": "",
+   "observed": null,
+   "observedError": "",
+   "outputs": {},
+   "requestId": "89028ede702e40948fcd3deae85e5577",
+   "state": "failed"
+  },
+  "fn": {
+   "attempt": 1,
+   "createdByPlan": true,
+   "error": "",
+   "lastDetail": {
+    "argo": {
+     "health": "Healthy",
+     "sync": "Synced"
+    },
+    "readyCondition": "ACK.ResourceSynced"
+   },
+   "mrUrl": "https://github.com/x/-/merge_requests/1",
+   "observed": {
+    "argo": {
+     "health": "Healthy",
+     "sync": "Synced"
+    },
+    "conditions": [],
+    "ready": true,
+    "readyCondition": "ACK.ResourceSynced",
+    "readyReason": ""
+   },
+   "observedError": "",
+   "outputs": {
+    "functionArn": "arn:aws:lambda:sa-east-1:111122223333:function:todo-fn"
+   },
+   "requestId": "5dcfeec9678016ca456f842d18558010",
+   "state": "ready"
+  }
+ },
+ "updatedAt": 1800000035,
+ "version": 7
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "provision-plan/v1",
+  "summary": "Function and HTTP API for the todo-app",
+  "items": [
+    {
+      "ref": "api",
+      "capability": "entrypoint/http-api/v1",
+      "name": "todo-api",
+      "inputs": {"targetFunctionArn": {"fromRef": "fn", "output": "functionArn"}}
+    },
+    {
+      "ref": "fn",
+      "capability": "compute/lambda/v1",
+      "name": "todo-fn",
+      "inputs": {
+        "s3Bucket": "appmod-artifacts-111122223333",
+        "s3Key": "todo-app/fn.zip",
+        "roleArn": "arn:aws:iam::111122223333:role/todo-fn",
+        "environmentVariables": {"APP": "todo"}
+      }
+    }
+  ]
+}
