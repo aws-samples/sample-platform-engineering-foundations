@@ -9,7 +9,7 @@
 | Team | AWS LATAM Containers |
 | Scope | Self-service portal (catalog, provisioning, inventory, scorecards, ownership, audit) over the kro and ACK compositions of the foundation |
 | Document status | Reference implementation |
-| Last updated | October 27, 2026 |
+| Last updated | October 28, 2026 |
 | Contact | [@brunokktro](https://github.com/brunokktro) |
 
 This extension adds a Cloudscape single-page portal on top of the platform the workshop builds: a service catalog read from `platform/catalog/`, a provisioning wizard that turns a request into a Git change, an inventory of the kro instances and their ACK children, a dependency graph across instances, a composition page with the schema and the GraphRevisions of every ResourceGraphDefinition, scorecards (Bronze, Silver, Gold) evaluated from the live objects, teams and owners, promotion between logical environments, a notifications drawer and an audit trail. It does **not** change the repository's workshop or self-paced paths: everything lives under `extensions/idp-portal/`, and `infrastructure/` and `labs/` at the root of the repository stay byte-identical.
@@ -32,6 +32,17 @@ platform-api --> DynamoDB (provision requests, platform events)   cluster-api --
 | Shared packages | `backend/platform_scope`, `backend/platform_events`, `backend/platform_identity` | Authorization by project scope, the immutable event store, and the caller identity adapter (`AUTH_MODE=jwt` reads the claims the API Gateway authorizer already validated). |
 | Infrastructure | `infrastructure/terraform/` | Cognito user pool, Hosted UI and public PKCE client; HTTP API with a JWT authorizer and explicit `GET`/`POST` routes; the two Lambdas; DynamoDB tables; a KMS HMAC key; a private S3 bucket behind CloudFront with Origin Access Control. |
 | Platform data | `platform/` | `catalog/` (capabilities and schemas), `compositions/` (kro ResourceGraphDefinitions), `scorecards/standards.json` (rules), `scope/registry.json` (organization, environments, projects, teams), `instances/` (example manifests). |
+
+## Screenshots
+
+Captured from this extension deployed as-is in a test account **without a cluster attached** (`scripts/deploy.sh` with the placeholder cluster values), English locale. That is why the live counts read "Not read" and the cluster widgets show a named failure instead of a number: the portal never paints a state it could not measure. With a cluster attached, the same pages fill with the kro instances, compositions and scorecards of your foundation.
+
+| | |
+|---|---|
+| **Sign-in** through the Cognito Hosted UI (PKCE, S256). Users are created by an admin; there is no self-signup. ![Cognito Hosted UI sign-in](docs/images/sign-in-cognito.png) | **Home**: a Cloudscape Board of widgets (platform summary, recent resources, operations in progress, catalog, next steps). Every number comes from the cluster-api; a failed read is said as such. ![Home](docs/images/home.png) |
+| **Service catalog**: the 16 capabilities bundled from `platform/catalog/`, with category, lifecycle, engine and golden path; the "State" column is the live read. ![Service catalog](docs/images/service-catalog.png) | **Provisioning wizard**: request definition, basic information, advanced options and review; the result is a manifest under `platform/instances/` proposed as a Git change. ![Provisioning wizard](docs/images/provision-wizard.png) |
+| **Getting started**: a six-step onboarding checklist, each step measured now (session, identity store, requests, instances), never remembered. ![Getting started](docs/images/getting-started.png) | **Documentation**: the repository's Markdown rendered inside the portal, with the same validator that gates links and figures. ![Documentation](docs/images/documentation.png) |
+| **Admin console**: users and access, audit trail, platform health, catalog lifecycle, deletion queue, provisioned AWS resources and the effective read-only settings; every section is admin-gated on the server and says what it could not measure. ![Admin console](docs/images/admin-console.png) | **Help center**: task-oriented entry points, the provisioning flow, access and identity per surface, and troubleshooting. ![Help center](docs/images/help-center.png) |
 
 The source of truth for every page is Git: the portal never writes to the cluster. A provisioning request becomes a manifest under `platform/instances/`; a GitOps controller (Argo CD in the workshop) applies it, kro reconciles the composition and the ACK controllers create the AWS resources. The portal reads the result back from the Kubernetes API.
 
