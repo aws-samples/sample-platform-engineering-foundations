@@ -1,0 +1,281 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xserverlessmultitiers.serverless.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: serverless.platform.sample.lab
+  names:
+    kind: XServerlessMultiTier
+    plural: xserverlessmultitiers
+  defaultCompositionRef:
+    name: xserverlessmultitier
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [name, team, roleArn, oacId, region]
+              properties:
+                name:
+                  type: string
+                  description: >-
+                    Application name. Every AWS resource is named sample-plat-<name>-<role>
+                    (tables -users and -posts, function -api, buckets -code and -web).
+                  pattern: "^[a-z][a-z0-9-]{1,22}[a-z0-9]$"
+                team:
+                  type: string
+                  description: Owning team, written to the `team` tag of every resource.
+                  pattern: "^[a-z0-9-]{2,40}$"
+                roleArn:
+                  type: string
+                  description: >-
+                    Hidden platform field. Shared function runtime role of the identity IaC (identity stack output
+                    ServerlessRuntimeRoleArn or Terraform output serverless_runtime_role_arn); the Lambda provider may pass only this role.
+                  pattern: "^arn:aws[a-z-]*:iam::[0-9]{12}:role/sample-plat-runtime-[a-zA-Z0-9-]{1,39}$"
+                oacId:
+                  type: string
+                  description: Hidden platform field. Shared CloudFront origin access control of the identity IaC (identity stack output ServerlessOacId or Terraform output serverless_oac_id).
+                  pattern: "^E[A-Z0-9]{8,20}$"
+                region:
+                  type: string
+                  description: Hidden platform field. Region of the cluster (aws_region of platform-contract.json); every regional resource uses it.
+                  pattern: "^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$"
+                size:
+                  type: string
+                  description: Function memory. small 256 MB, medium 512 MB, large 1024 MB.
+                  enum: [small, medium, large]
+                  default: small
+            status:
+              type: object
+              properties:
+                database:
+                  type: object
+                  properties:
+                    users:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        arn: {type: string}
+                    posts:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        arn: {type: string}
+                lambda:
+                  type: object
+                  properties:
+                    name: {type: string}
+                    arn: {type: string}
+                    invokeArn: {type: string}
+                api:
+                  type: object
+                  properties:
+                    executionArn: {type: string}
+                    invokeUrl: {type: string}
+                    healthUrl: {type: string}
+                frontend:
+                  type: object
+                  properties:
+                    domainName: {type: string}
+                    url: {type: string}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xdynamodbtables.serverless.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: serverless.platform.sample.lab
+  names:
+    kind: XDynamoDBTable
+    plural: xdynamodbtables
+  defaultCompositionRef:
+    name: xdynamodbtable
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [tableName, team, app, region]
+              properties:
+                tableName:
+                  type: string
+                  description: Table name, inside the platform prefix. On-demand billing, PITR and SSE are fixed.
+                  pattern: "^sample-plat-[a-z0-9-]{1,60}$"
+                team: {type: string, pattern: "^[a-z0-9-]{2,40}$"}
+                app: {type: string, pattern: "^[a-z][a-z0-9-]{1,22}[a-z0-9]$"}
+                region: {type: string, pattern: "^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$"}
+            status:
+              type: object
+              properties:
+                name: {type: string}
+                arn: {type: string}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xlambdafunctions.serverless.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: serverless.platform.sample.lab
+  names:
+    kind: XLambdaFunction
+    plural: xlambdafunctions
+  defaultCompositionRef:
+    name: xlambdafunction
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [functionName, codeBucketName, roleArn, team, app, environment, region]
+              properties:
+                functionName:
+                  type: string
+                  pattern: "^sample-plat-[a-z0-9-]{1,46}$"
+                codeBucketName:
+                  type: string
+                  description: Bucket created by this XR for the deployment package (versioned, private).
+                  pattern: "^sample-plat-[a-z0-9-]{1,46}$"
+                roleArn:
+                  type: string
+                  description: Execution role, the shared runtime role of the identity IaC (from the parent XR).
+                  pattern: "^arn:aws[a-z-]*:iam::[0-9]{12}:role/sample-plat-runtime-[a-zA-Z0-9-]{1,39}$"
+                memorySize:
+                  type: integer
+                  enum: [256, 512, 1024]
+                  default: 256
+                environment:
+                  type: object
+                  description: Environment variables of the function.
+                  maxProperties: 10
+                  additionalProperties: {type: string, maxLength: 256}
+                team: {type: string, pattern: "^[a-z0-9-]{2,40}$"}
+                app: {type: string, pattern: "^[a-z][a-z0-9-]{1,22}[a-z0-9]$"}
+                region: {type: string, pattern: "^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$"}
+            status:
+              type: object
+              properties:
+                name: {type: string}
+                arn: {type: string}
+                invokeArn: {type: string}
+                codeKey: {type: string}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xapirests.serverless.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: serverless.platform.sample.lab
+  names:
+    kind: XApiRest
+    plural: xapirests
+  defaultCompositionRef:
+    name: xapirest
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [apiName, openApiSpecification, team, app, region]
+              properties:
+                apiName:
+                  type: string
+                  pattern: "^sample-plat-[a-z0-9-]{1,46}$"
+                openApiSpecification:
+                  type: string
+                  description: OpenAPI 3 body, rendered by the parent Composition with the function invoke ARN.
+                  maxLength: 20000
+                stageName:
+                  type: string
+                  default: v1
+                  pattern: "^[a-z0-9]{1,16}$"
+                team: {type: string, pattern: "^[a-z0-9-]{2,40}$"}
+                app: {type: string, pattern: "^[a-z][a-z0-9-]{1,22}[a-z0-9]$"}
+                region: {type: string, pattern: "^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$"}
+            status:
+              type: object
+              properties:
+                restApiId: {type: string}
+                executionArn: {type: string}
+                invokeUrl: {type: string}
+---
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xspas.serverless.platform.sample.lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  scope: Namespaced
+  group: serverless.platform.sample.lab
+  names:
+    kind: XSpa
+    plural: xspas
+  defaultCompositionRef:
+    name: xspa
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [bucketName, apiUrl, oacId, team, app, region]
+              properties:
+                bucketName:
+                  type: string
+                  description: Private bucket of the static site, read only by this distribution (OAC).
+                  pattern: "^sample-plat-[a-z0-9-]{1,46}$"
+                apiUrl:
+                  type: string
+                  description: Invoke URL of the API, written into index.html.
+                  pattern: "^https://[a-z0-9]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com/[a-z0-9]{1,16}$"
+                oacId:
+                  type: string
+                  description: Shared CloudFront origin access control of the identity IaC (from the parent XR).
+                  pattern: "^E[A-Z0-9]{8,20}$"
+                team: {type: string, pattern: "^[a-z0-9-]{2,40}$"}
+                app: {type: string, pattern: "^[a-z][a-z0-9-]{1,22}[a-z0-9]$"}
+                region: {type: string, pattern: "^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$"}
+            status:
+              type: object
+              properties:
+                bucketName: {type: string}
+                bucketRegionalDomainName: {type: string}
+                distributionArn: {type: string}
+                domainName: {type: string}
+                partition: {type: string}

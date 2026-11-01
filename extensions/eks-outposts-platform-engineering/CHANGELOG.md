@@ -2,6 +2,21 @@
 
 All notable changes to the Platform Engineering demo on Amazon EKS local clusters on AWS Outposts are documented here.
 
+## 2026-10-31
+
+- Added the local Retail Store under `platform/apps/retail-store`: storefront and cart of the AWS Retail Store sample application v1.6.3 with DynamoDB Local and a table initializer sidecar, images from the local Harbor by digest, no egress outside the namespace, `ClusterIP` Services only, and an ApplicationSet generator gated by the `enable_retail_store` cluster Secret label.
+- Added the egress cut under `platform/components/chaos-egress`: a time-boxed Chaos Mesh 2.8.7 `NetworkChaos` partition towards the Region and the Internet, `cut` and `control` probes that publish `platform_probe_*` series, an atomic JSON report, automatic recovery and rollback, a pinned chart verified by SHA-256 before install, and an 8-minute scene enforced by `--choreography`.
+- Added the Grafana dashboard **Platform connectivity during disconnection**, applied by the new `platform-dashboards` ApplicationSet element, and its single source of queries in `platform/components/observability/connectivity/queries.yaml` with the generated `QUERIES.md`.
+- Added the serverless multi-tier Crossplane recipe (`XServerlessMultiTier` and four composed XRs) and the lambda, apigateway, cloudfront and cloudwatchlogs providers from the local Harbor. The recipe runs after the egress recovery.
+- The serverless REST API has no authorizer, and the Crossplane README states it as a risk accepted in this sample, with the production replacement. The offline serverless test now requires stage throttling on `*/*` at no more than 10 requests per second and burst 20, with one new mutation control (24 in total).
+- Both IaC fronts add one Pod Identity role and association per serverless provider, the shared function runtime role and the CloudFront origin access control, with the outputs `ServerlessRuntimeRoleArn` and `ServerlessOacId` (CloudFormation) and `serverless_runtime_role_arn` and `serverless_oac_id` (Terraform). No provider can create an IAM identity.
+- The parity gate checks the serverless identity in both fronts and its least-privilege rules, with eighteen new mutation controls (36 in total). The CloudFormation check of the original Crossplane role now selects it by logical ID.
+- The parity gate keeps a closed identity inventory of both fronts: any IAM, Pod Identity, access entry or origin access control resource outside the reviewed list fails, and so does any managed policy or permissions boundary on the Crossplane roles. Both fronts refuse a Crossplane cluster name longer than 38 characters.
+- The Chaos Mesh dashboard Service is `ClusterIP`; `check-chart` refuses `NodePort` and `LoadBalancer` Services, and the offline tests check the real values file and the chart pin.
+- `bash scripts/validate.sh` also fails on accented Latin letters and on non-English prose without accents inside the extension, on any sentence that claims a successful run on real clusters, racks or hardware, and on Markdown links to missing headings.
+- Added `python3 scripts/check-reachability.py`, which proves that every committed file is reachable from the README and that no two files have the same content, and wired every new suite into `bash scripts/validate.sh`.
+- Documented the omitted source features: the shared load balancer address for the Retail Store and the Backstage golden paths.
+
 ## 2026-10-24
 
 - Scoped the architecture diagram to short Service Link disconnections: the Amazon EBS gp2 data plane on the Outpost now carries a short-disconnections-only marker, because re-replication needs the Amazon EBS control plane in the Region.

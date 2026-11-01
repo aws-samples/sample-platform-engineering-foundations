@@ -111,6 +111,18 @@ output "crossplane_pod_identity_association_arns" {
   value = { for k, a in aws_eks_pod_identity_association.crossplane : k => a.association_arn }
 }
 
+output "crossplane_serverless_pod_identity_association_arns" {
+  value = { for k, a in aws_eks_pod_identity_association.crossplane_serverless : k => a.association_arn }
+}
+
+output "serverless_runtime_role_arn" {
+  value = coalesce(one(aws_iam_role.serverless_runtime[*].arn), "disabled")
+}
+
+output "serverless_oac_id" {
+  value = coalesce(one(aws_cloudfront_origin_access_control.serverless[*].id), "disabled")
+}
+
 output "registry_service_ip" {
   value = var.local_registry == null ? null : var.local_registry.ip
 }

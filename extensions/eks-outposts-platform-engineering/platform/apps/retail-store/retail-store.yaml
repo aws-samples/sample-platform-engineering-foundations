@@ -1,0 +1,332 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: retail-ui
+  labels: {app.kubernetes.io/name: retail-ui, app.kubernetes.io/part-of: retail-store}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: retail-cart
+  labels: {app.kubernetes.io/name: retail-cart, app.kubernetes.io/part-of: retail-store}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: retail-dynamodb
+  labels: {app.kubernetes.io/name: retail-dynamodb, app.kubernetes.io/part-of: retail-store}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retail-dynamodb
+  labels: {app.kubernetes.io/name: retail-dynamodb, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: database}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: retail-dynamodb}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: retail-dynamodb, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: database}
+    spec:
+      serviceAccountName: retail-dynamodb
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: dynamodb
+          image: harbor.local/apps/aws-dynamodb-local:1.25.1@sha256:58e980787da883cdc5b6d9c75f4b5f8946fcae9c73046a43f807b0f804f6fe4d
+          args: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+          ports:
+            - {name: dynamodb, containerPort: 8000, protocol: TCP}
+          readinessProbe:
+            exec: {command: [curl, -s, -o, /dev/null, --max-time, "2", "http://127.0.0.1:8000/"]}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+        - name: table-init
+          image: harbor.local/apps/aws-cli:2.39.1@sha256:3517c17b5f01637df3b6184a4280fbcc36e4ea38105954cade628ff17bb9a7b9
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -u
+              ep=http://127.0.0.1:8000
+              dir=$INIT_STATE_DIR
+              mkdir -p "$dir"
+              trap 'exit 0' TERM
+              ddb() { aws dynamodb --endpoint-url "$ep" --cli-connect-timeout 2 --cli-read-timeout 5 --output text "$@"; }
+              last=
+              say() { if [ "$1" != "$last" ]; then echo "INIT $1"; last=$1; fi; }
+              pause() { sleep "$1" & wait $!; }
+              while true; do
+                date +%s > "$dir/heartbeat"
+                if out=$(ddb describe-table --table-name Items --query Table.TableStatus 2>&1); then
+                  if [ "$out" = ACTIVE ]; then
+                    date +%s > "$dir/table-ready"
+                    say "table=Items result=noop status=ACTIVE"
+                  else
+                    rm -f "$dir/table-ready"
+                    say "table=Items status=$out"
+                  fi
+                else
+                  rm -f "$dir/table-ready"
+                  case "$out" in
+                    *ResourceNotFoundException*)
+                      if out=$(ddb create-table --table-name Items \
+                          --attribute-definitions AttributeName=id,AttributeType=S AttributeName=customerId,AttributeType=S \
+                          --key-schema AttributeName=id,KeyType=HASH \
+                          --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1 \
+                          --global-secondary-indexes 'IndexName=idx_global_customerId,KeySchema=[{AttributeName=customerId,KeyType=HASH}],Projection={ProjectionType=ALL},ProvisionedThroughput={ReadCapacityUnits=1,WriteCapacityUnits=1}' \
+                          --query TableDescription.TableName 2>&1); then
+                        say "table=Items result=created"
+                        pause 1
+                        continue
+                      fi
+                      case "$out" in
+                        *ResourceInUseException*) say "table=Items result=noop reason=created-concurrently"; pause 1; continue ;;
+                      esac
+                      say "create-table failed: $(printf '%s' "$out" | tail -n 1)" ;;
+                    *) say "waiting for $ep: $(printf '%s' "$out" | tail -n 1)" ;;
+                  esac
+                fi
+                pause "$RECONCILE_SECONDS"
+              done
+          env:
+            - {name: HOME, value: /tmp}
+            - {name: INIT_STATE_DIR, value: /tmp/init}
+            - {name: RECONCILE_SECONDS, value: "10"}
+            - {name: AWS_ACCESS_KEY_ID, value: localdemoonly}
+            - {name: AWS_SECRET_ACCESS_KEY, value: localdemoonly}
+            - {name: AWS_REGION, value: us-east-1}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+            - {name: AWS_PAGER, value: ""}
+            - {name: AWS_MAX_ATTEMPTS, value: "1"}
+          readinessProbe:
+            exec:
+              command: [/bin/bash, -c, 'now=$(date +%s); t=$(cat "$INIT_STATE_DIR/table-ready" 2>/dev/null) || exit 1; [ $((now - t)) -le $((3 * RECONCILE_SECONDS)) ]']
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: [/bin/bash, -c, 'now=$(date +%s); t=$(cat "$INIT_STATE_DIR/heartbeat" 2>/dev/null) || exit 1; [ $((now - t)) -le 60 ]']
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: init-tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+        - {name: init-tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retail-dynamodb
+  labels: {app.kubernetes.io/name: retail-dynamodb, app.kubernetes.io/part-of: retail-store}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: retail-dynamodb}
+  ports:
+    - {name: dynamodb, port: 8000, targetPort: dynamodb, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retail-cart
+  labels: {app.kubernetes.io/name: retail-cart, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: service}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: retail-cart}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: retail-cart, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: service}
+    spec:
+      serviceAccountName: retail-cart
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: cart
+          image: harbor.local/apps/retail-store-sample-cart:1.6.3@sha256:9ab627ec637bde4f9578e9dd9cdb0c58ff25a39a982cc83bf5d2baadc32958bb
+          env:
+            - {name: JAVA_OPTS, value: "-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom"}
+            - {name: RETAIL_CART_PERSISTENCE_PROVIDER, value: dynamodb}
+            - {name: RETAIL_CART_PERSISTENCE_DYNAMODB_TABLE_NAME, value: Items}
+            - {name: RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE, value: "false"}
+            - {name: RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT, value: "http://retail-dynamodb:8000"}
+            - {name: AWS_ACCESS_KEY_ID, value: localdemoonly}
+            - {name: AWS_SECRET_ACCESS_KEY, value: localdemoonly}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+          ports:
+            - {name: http, containerPort: 8080, protocol: TCP}
+          readinessProbe:
+            exec: {command: [curl, -fsS, -o, /dev/null, --max-time, "2", "http://127.0.0.1:8080/actuator/health/readiness"]}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 256m, memory: 512Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retail-cart
+  labels: {app.kubernetes.io/name: retail-cart, app.kubernetes.io/part-of: retail-store}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: retail-cart}
+  ports:
+    - {name: http, port: 80, targetPort: http, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retail-ui
+  labels: {app.kubernetes.io/name: retail-ui, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: ui}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: retail-ui}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: retail-ui, app.kubernetes.io/part-of: retail-store, app.kubernetes.io/component: ui}
+    spec:
+      serviceAccountName: retail-ui
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: ui
+          image: harbor.local/apps/retail-store-sample-ui:1.6.3@sha256:e5936e5286f55bb6eb6c8bc1746a67b5c8890bf1cd3699795598856a9f0590a0
+          env:
+            - {name: JAVA_OPTS, value: "-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom"}
+            - {name: RETAIL_UI_ENDPOINTS_CARTS, value: "http://retail-cart"}
+            - name: METADATA_KUBERNETES_POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: METADATA_KUBERNETES_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: METADATA_KUBERNETES_NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {name: http, containerPort: 8080, protocol: TCP}
+          readinessProbe:
+            exec: {command: [curl, -fsS, -o, /dev/null, --max-time, "2", "http://127.0.0.1:8080/actuator/health/readiness"]}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 128m, memory: 512Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retail-ui
+  labels: {app.kubernetes.io/name: retail-ui, app.kubernetes.io/part-of: retail-store}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: retail-ui}
+  ports:
+  - {name: http, port: 80, targetPort: http, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retail-ui
+  labels: {app.kubernetes.io/part-of: retail-store}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: retail-ui}
+  policyTypes: [Ingress, Egress]
+  egress:
+  - to:
+    - podSelector:
+        matchLabels: {app.kubernetes.io/name: retail-cart}
+    ports:
+    - {port: 8080, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retail-cart
+  labels: {app.kubernetes.io/part-of: retail-store}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: retail-cart}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {app.kubernetes.io/name: retail-ui}
+    ports:
+    - {port: 8080, protocol: TCP}
+  egress:
+  - to:
+    - podSelector:
+        matchLabels: {app.kubernetes.io/name: retail-dynamodb}
+    ports:
+    - {port: 8000, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retail-dynamodb
+  labels: {app.kubernetes.io/part-of: retail-store}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: retail-dynamodb}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: retail-cart}
+      ports: [{port: 8000, protocol: TCP}]
+  egress: []

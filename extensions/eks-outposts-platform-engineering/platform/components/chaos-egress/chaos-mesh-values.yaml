@@ -1,0 +1,23 @@
+images:
+  registry: ghcr.io
+  tag: v2.8.7
+controllerManager:
+  replicaCount: 1
+  enableFilterNamespace: true
+  allowHostNetworkTesting: false
+  image:
+    tag: v2.8.7@sha256:b617afa786a654eb6ba3a947a40d9e20db2bae8f17ded71947d5744dceea2ae4
+chaosDaemon:
+  runtime: containerd
+  socketPath: /run/containerd/containerd.sock
+  image:
+    tag: v2.8.7@sha256:87d5d2091bc134b857dba1e391b4bd3148a670e05243fe75b2e944cda166a92e
+dnsServer:
+  create: false
+dashboard:
+  create: true
+  securityMode: true
+  service:
+    type: ClusterIP
+  image:
+    tag: v2.8.7@sha256:7dfce19003e4f72e9cd48b453312c515b17262f18c08cdf0f67cfcaa1e2ac2fa

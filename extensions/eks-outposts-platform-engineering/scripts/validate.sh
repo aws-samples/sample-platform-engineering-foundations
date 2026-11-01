@@ -4,6 +4,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 README=${ROOT_README:-"$ROOT/../../README.md"}
 [[ -f "$README" ]] || { echo "root README not found: $README" >&2; exit 2; }
 MODE=${1:-}
+export PYTHONDONTWRITEBYTECODE=1
 python3 - "$ROOT" "$README" <<'PY'
 import os, re, sys
 from pathlib import Path
@@ -32,6 +33,38 @@ patterns={
   'language-term': re.compile(r'\b(?:'+'|'.join(re.escape(x) for x in foreign_terms)+r')\b', re.I),
   'em-dash': re.compile(chr(0x2014)),
 }
+# Inside the extension: no accented Latin letter (the docs are en-US) and no claim of a live acceptance run.
+local_patterns={
+  'non-english-letter': re.compile('['+chr(0xC0)+'-'+chr(0xD6)+chr(0xD8)+'-'+chr(0xF6)+chr(0xF8)+'-'+chr(0x24F)+chr(0x1E00)+'-'+chr(0x1EFF)+']'),
+}
+# A sentence that says a run succeeded on real infrastructure is an acceptance claim unless it is negated, conditional
+# or attributed to the source implementation. The verbs are assembled so this file does not match itself.
+claim_verbs='|'.join(['valid'+'ated','veri'+'fied','tes'+'ted','pro'+'ven','exer'+'cised','con'+'firmed','demon'+'strated','mea'+'sured','succ'+'eeded','pas'+'sed','wor'+'ked'])
+claim_env=r'(?:clusters?|racks?|Outposts?|hardware|production)'
+claim_rx=re.compile(r'\b(?:'+claim_verbs+r')\b[^.;\n]{0,80}?\b'+claim_env+r'\b|\b'+claim_env+r'\b[^.;\n]{0,40}?\b(?:was|were|has been|have been)\s+(?:successfully\s+)?(?:'+claim_verbs+r')\b', re.I)
+claim_exempt=re.compile(r"\b(?:not|never|no|until|unless|must|should|cannot|without|source)\b", re.I)
+# Portuguese prose without accents: two distinct Portuguese function words, written in lower case or capitalized,
+# on one line. Upper-case acronyms (NAS, DOS) and hyphenated or dotted tokens do not count.
+pt_words={''.join(x) for x in [('d','a'),('d','as'),('d','os'),('s','em'),('p','ara'),('p','elo'),('p','ela'),('u','ma'),('q','ue'),('a','os'),('n','as'),('n','os'),('dur','ante'),('ai','nda'),('por','que'),('on','de'),('is','so'),('es','sa'),('es','se'),('dep','ois'),('qua','ndo'),('ent','re'),('so','bre'),('ma','is'),('t','em'),('s','ao'),('est','ao'),('c','om'),('n','um'),('nu','ma'),('pe','los'),('pe','las'),('tam','bem'),('ent','ao'),('ag','ora'),('ess','es'),('est','e'),('est','a'),('voc','e'),('n','ao'),('m','as'),('n','ossa'),('n','osso')]}
+pt_token=re.compile(r'(?<![\w./@:-])([A-Z]?[a-z]+)(?![\w/@-])')
+def acceptance_claims(text):
+  return [(n,s.strip()) for n,line in enumerate(text.splitlines(),1) for s in re.split(r'(?<=[.;])\s+',line) if claim_rx.search(s) and not claim_exempt.search(s)]
+def portuguese_lines(text):
+  return [(n,line.strip()) for n,line in enumerate(text.splitlines(),1) if len({w.lower() for w in pt_token.findall(line)} & pt_words)>=2]
+def slug(heading):
+  text=re.sub(r'[`*_]|\[([^]]*)\]\([^)]*\)', lambda m: m.group(1) or '', heading.strip().lower())
+  return re.sub(r'\s', '-', re.sub(r'[^\w\s-]', '', text))
+def anchors(path):
+  found, seen, fenced = set(), {}, False
+  for line in path.read_text('utf-8').splitlines():
+    if line.lstrip().startswith('```'): fenced = not fenced; continue
+    if fenced: continue
+    m=re.match(r'#{1,6}\s+(.*?)\s*#*\s*$', line)
+    if m:
+      base=slug(m.group(1)); n=seen.get(base,0); seen[base]=n+1
+      found.add(base if n==0 else f'{base}-{n}')
+    found.update(re.findall(r'<a\s+(?:id|name)="([^"]+)"', line))
+  return found
 def denied(text):
   lower=text.lower(); found=[]
   for mode,term in deny_rules:
@@ -55,15 +88,36 @@ for path in files:
   for name,rx in patterns.items():
     for m in rx.finditer(scan_text): errors.append(f'{rel}:{scan_text.count(chr(10),0,m.start())+1}:{name}:{m.group(0)}')
   for term in denied(scan_text): errors.append(f'{rel}:private-denylist-match')
+  inside=path.resolve().is_relative_to(root.resolve())
+  if inside:
+    for name,rx in local_patterns.items():
+      for m in rx.finditer(scan_text): errors.append(f'{rel}:{scan_text.count(chr(10),0,m.start())+1}:{name}:{m.group(0)}')
+    for n,sentence in acceptance_claims(scan_text): errors.append(f'{rel}:{n}:acceptance-claim:{sentence[:120]}')
+    for n,line in portuguese_lines(scan_text): errors.append(f'{rel}:{n}:non-english-prose:{line[:120]}')
   for m in re.finditer(r'\[[^]]+\]\((?!https?://|#)([^)]+)\)', text):
     target=m.group(1).split('#',1)[0]
     if target and not (path.parent/target).resolve().exists(): errors.append(f'{rel}:{text.count(chr(10),0,m.start())+1}:broken-link:{target}')
+  if path.suffix=='.md' and inside:
+    for m in re.finditer(r'\[[^]]+\]\((?!https?://)([^)#]*)#([^)]+)\)', text):
+      target=(path.parent/m.group(1)).resolve() if m.group(1) else path
+      if target.suffix=='.md' and target.is_file() and m.group(2) not in anchors(target):
+        errors.append(f'{rel}:{text.count(chr(10),0,m.start())+1}:broken-anchor:{m.group(1)}#{m.group(2)}')
 if errors:
   print('\n'.join(errors)); raise SystemExit(1)
 unsafe='A'+'KIA'+'ABCDEFGHIJKLMNOP vpc-'+'0123456789abcdef0 ' + chr(0x2014) + ' TO'+'DO'
 safe='platform-outposts <AWS_ACCOUNT_ID> https://docs.aws.amazon.com/eks/ platform.local'
 assert any(rx.search(unsafe) for rx in patterns.values())
 assert not any(rx.search(safe) for rx in patterns.values())
+assert local_patterns['non-english-letter'].search('Regi'+chr(0xE3)+'o')
+for sample in ['valid'+'ated end to end on two clusters', 'The live behavior was exer'+'cised successfully on two Outposts racks;', 'Both clusters have been valid'+'ated.']:
+  assert acceptance_claims(sample), sample
+for sample in ['Region valid'+'ated until every criterion passes on the target rack', 'The live behavior has not been mea'+'sured;', 'the source exer'+'cised that class on the same rack.']:
+  assert not acceptance_claims(sample), sample
+for sample in ['O carrinho continua funcionando dur'+'ante o corte d'+'a rede, s'+'em depender d'+'a nuvem.', 'A loja funciona s'+'em a rede, m'+'as o painel mostra a queda.']:
+  assert portuguese_lines(sample), sample
+for sample in ['Use the data from the sem-ver tag.', 'Set NAS mount options; DOS line endings fail.']:
+  assert not portuguese_lines(sample), sample
+assert slug('Rollback and `uninstall`') == 'rollback-and-uninstall' and slug('The 8-minute scene') == 'the-8-minute-scene'
 if deny_rules:
   assert denied(deny_rules[0][1])
   assert not denied('public-canary-value')
@@ -76,6 +130,13 @@ from pathlib import Path
 for name in sys.argv[1:]: compile(Path(name).read_text(), name, 'exec')
 PY
 python3 "$ROOT/scripts/check-iac-parity.py" "$ROOT"
+python3 "$ROOT/scripts/check-reachability.py" "$ROOT"
+python3 "$ROOT/platform/components/crossplane/tests/test-serverless.py"
+python3 "$ROOT/platform/components/crossplane/serverless-handler/build.py" --check
+python3 -m unittest discover -s "$ROOT/platform/components/chaos-egress/tests"
+python3 "$ROOT/platform/components/observability/connectivity/tests/test_connectivity.py"
+python3 "$ROOT/platform/components/observability/connectivity/tests/test_queries_doc.py"
+python3 "$ROOT/platform/apps/retail-store/tests/test_retail_store.py"
 python3 - "$ROOT" <<'PY'
 import json, shutil, subprocess, sys, tempfile
 from pathlib import Path
@@ -109,8 +170,8 @@ for path in Path(sys.argv[1]).rglob('*'):
     list(yaml.load_all(path.read_text(), Loader=Loader))
 print('PASS yaml-parse')
 PY
-for script in "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh; do bash -n "$script"; done
-if command -v shellcheck >/dev/null; then shellcheck "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh; fi
+for script in "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh "$ROOT"/platform/components/chaos-egress/*.sh; do bash -n "$script"; done
+if command -v shellcheck >/dev/null; then shellcheck "$ROOT"/scripts/*.sh "$ROOT"/infrastructure/cloudformation/*.sh "$ROOT"/platform/gitops/*.sh "$ROOT"/platform/components/registry/*.sh "$ROOT"/platform/components/chaos-egress/*.sh; fi
 if command -v kubeconform >/dev/null; then
   manifests=()
   while IFS= read -r -d '' candidate; do

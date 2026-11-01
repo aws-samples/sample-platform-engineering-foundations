@@ -1,0 +1,862 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xserverlessmultitier
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: serverless.platform.sample.lab/v1alpha1
+    kind: XServerlessMultiTier
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: owner
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.team
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.app
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.region
+        resources:
+          - name: database-users
+            base:
+              apiVersion: serverless.platform.sample.lab/v1alpha1
+              kind: XDynamoDBTable
+              spec: {}
+            patches:
+              - type: PatchSet
+                patchSetName: owner
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.tableName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s-users"}}
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.arn
+                toFieldPath: status.database.users.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.name
+                toFieldPath: status.database.users.name
+
+          - name: database-posts
+            base:
+              apiVersion: serverless.platform.sample.lab/v1alpha1
+              kind: XDynamoDBTable
+              spec: {}
+            patches:
+              - type: PatchSet
+                patchSetName: owner
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.tableName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s-posts"}}
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.arn
+                toFieldPath: status.database.posts.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.name
+                toFieldPath: status.database.posts.name
+
+          - name: lambda
+            base:
+              apiVersion: serverless.platform.sample.lab/v1alpha1
+              kind: XLambdaFunction
+              spec: {}
+            patches:
+              - type: PatchSet
+                patchSetName: owner
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.functionName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s-api"}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.codeBucketName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s-code"}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.memorySize
+                transforms:
+                  - {type: map, map: {small: 256, medium: 512, large: 1024}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.roleArn
+                toFieldPath: spec.roleArn
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.database.users.name
+                toFieldPath: spec.environment.USERS_TABLE
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.database.posts.name
+                toFieldPath: spec.environment.POSTS_TABLE
+                policy: {fromFieldPath: Required}
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.arn
+                toFieldPath: status.lambda.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.name
+                toFieldPath: status.lambda.name
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.invokeArn
+                toFieldPath: status.lambda.invokeArn
+
+          - name: api
+            base:
+              apiVersion: serverless.platform.sample.lab/v1alpha1
+              kind: XApiRest
+              spec:
+                stageName: v1
+            patches:
+              - type: PatchSet
+                patchSetName: owner
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.apiName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s"}}
+              - type: CombineFromComposite
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: status.lambda.invokeArn
+                    - fromFieldPath: spec.name
+                  string:
+                    fmt: |-
+                      {
+                        "openapi": "3.0.1",
+                        "info": {"title": "sample-plat-%[2]s", "version": "1"},
+                        "paths": {
+                          "/health": {
+                            "get": {
+                              "responses": {"200": {"description": "both tables reachable"}},
+                              "x-amazon-apigateway-integration": {"type": "aws_proxy", "httpMethod": "POST", "uri": "%[1]s"}
+                            }
+                          },
+                          "/items": {
+                            "get": {
+                              "responses": {"200": {"description": "up to 20 items"}},
+                              "x-amazon-apigateway-integration": {"type": "aws_proxy", "httpMethod": "POST", "uri": "%[1]s"}
+                            },
+                            "post": {
+                              "responses": {"201": {"description": "item stored"}},
+                              "x-amazon-apigateway-integration": {"type": "aws_proxy", "httpMethod": "POST", "uri": "%[1]s"}
+                            }
+                          }
+                        }
+                      }
+                toFieldPath: spec.openApiSpecification
+                policy: {fromFieldPath: Required}
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.executionArn
+                toFieldPath: status.api.executionArn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.invokeUrl
+                toFieldPath: status.api.invokeUrl
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.invokeUrl
+                toFieldPath: status.api.healthUrl
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "%s/health"}}
+
+          - name: lambda-permission
+            base:
+              apiVersion: lambda.aws.m.upbound.io/v1beta1
+              kind: Permission
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  action: lambda:InvokeFunction
+                  principal: apigateway.amazonaws.com
+                  statementId: apigateway-invoke
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.lambda.name
+                toFieldPath: spec.forProvider.functionName
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.api.executionArn
+                toFieldPath: spec.forProvider.sourceArn
+                policy: {fromFieldPath: Required}
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "%s/v1/*"}}
+
+          - name: frontend
+            base:
+              apiVersion: serverless.platform.sample.lab/v1alpha1
+              kind: XSpa
+              spec: {}
+            patches:
+              - type: PatchSet
+                patchSetName: owner
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.name
+                toFieldPath: spec.bucketName
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "sample-plat-%s-web"}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.api.invokeUrl
+                toFieldPath: spec.apiUrl
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.oacId
+                toFieldPath: spec.oacId
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.domainName
+                toFieldPath: status.frontend.domainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.domainName
+                toFieldPath: status.frontend.url
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "https://%s"}}
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdynamodbtable
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: serverless.platform.sample.lab/v1alpha1
+    kind: XDynamoDBTable
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+        resources:
+          - name: table
+            base:
+              apiVersion: dynamodb.aws.m.upbound.io/v1beta1
+              kind: Table
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  billingMode: PAY_PER_REQUEST
+                  pointInTimeRecovery: {enabled: true}
+                  serverSideEncryption: {enabled: true}
+                  attribute:
+                    - {name: pk, type: S}
+                  hashKey: pk
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.tableName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.name
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xlambdafunction
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: serverless.platform.sample.lab/v1alpha1
+    kind: XLambdaFunction
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+          - name: code-bucket
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.codeBucketName
+                toFieldPath: spec.forProvider.bucket
+        resources:
+          - name: code-bucket
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  forceDestroy: true
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.codeBucketName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+          - name: code-bucket-public-access-block
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: code-bucket}
+          - name: code-bucket-encryption
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: AES256
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: code-bucket}
+          - name: code-bucket-versioning
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  versioningConfiguration:
+                    status: Enabled
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: code-bucket}
+          - name: code-bucket-ownership
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketOwnershipControls
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  rule:
+                    objectOwnership: BucketOwnerEnforced
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: code-bucket}
+          - name: code
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Object
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  key: function.zip
+                  contentType: application/zip
+                  contentBase64: "UEsDBBQAAAAAAAAAIQALFVBtMwoAADMKAAAHAAAAbWFpbi5weSIiIkRlbW8gQVBJIG9mIHRoZSBYU2VydmVybGVzc011bHRpVGllciByZWNpcGU6IGEgTGFtYmRhIHByb3h5IGludGVncmF0aW9uIGJlaGluZCBBUEkgR2F0ZXdheS4KClRoaXMgZmlsZSBpcyB0aGUgcmV2aWV3ZWQgc291cmNlIG9mIHRoZSB6aXAgZW1iZWRkZWQgaW4gcmVjaXBlcy9zZXJ2ZXJsZXNzLWNvbXBvc2l0aW9ucy55YW1sCihYTGFtYmRhRnVuY3Rpb24sIHJlc291cmNlIGBjb2RlYCkuIGJ1aWxkLnB5IHJlYnVpbGRzIHRoZSB6aXAgYnl0ZSBmb3IgYnl0ZTsgdGVzdHMvdGVzdC1zZXJ2ZXJsZXNzLnB5CmZhaWxzIHdoZW4gdGhlIGVtYmVkZGVkIGNvcHkgYW5kIHRoaXMgZmlsZSBkaXZlcmdlLiBBIGNsYWltIGNhbm5vdCBpbmplY3Qgb3RoZXIgY29kZS4KClJvdXRlcyAodGhlIE9wZW5BUEkgYm9keSBvZiB0aGUgQ29tcG9zaXRpb24gZGVjbGFyZXMgZXhhY3RseSB0aGVzZSB0aHJlZSk6CiAgR0VUICAvaGVhbHRoICByZWFkcyBvbmUga2V5IGZyb20gZWFjaCB0YWJsZSwgcHJvdmluZyB0aGUgZnVuY3Rpb24gcmVhY2hlcyBib3RoIER5bmFtb0RCIHRhYmxlcwogICAgICAgICAgICAgICAgd2l0aCB0aGUgaW5saW5lIHBvbGljeSB0aGF0IHRoZSBDb21wb3NpdGlvbiBzY29wZWQgdG8gdGhlaXIgdHdvIEFSTnMuCiAgR0VUICAvaXRlbXMgICBsaXN0cyB1cCB0byAyMCBpdGVtcyBvZiB0aGUgcG9zdHMgdGFibGUuCiAgUE9TVCAvaXRlbXMgICBzdG9yZXMgeyJpZCI6ICIuLi4iLCAidGV4dCI6ICIuLi4ifTsgZGVtbyBkYXRhIG9ubHksIGlkIGFuZCB0ZXh0IGFyZSBzaXplLWNhcHBlZC4KIiIiCmltcG9ydCBqc29uCmltcG9ydCBvcwppbXBvcnQgcmUKCmltcG9ydCBib3RvMwoKX0REQiA9IGJvdG8zLmNsaWVudCgiZHluYW1vZGIiKQpfSUQgPSByZS5jb21waWxlKHIiXltBLVphLXowLTlfLV17MSw2NH0kIikKTUFYX1RFWFQgPSAyODAKCgpkZWYgX3Jlc3Aoc3RhdHVzLCBib2R5KToKICAgIHJldHVybiB7CiAgICAgICAgInN0YXR1c0NvZGUiOiBzdGF0dXMsCiAgICAgICAgImhlYWRlcnMiOiB7ImNvbnRlbnQtdHlwZSI6ICJhcHBsaWNhdGlvbi9qc29uIiwgImFjY2Vzcy1jb250cm9sLWFsbG93LW9yaWdpbiI6ICIqIn0sCiAgICAgICAgImJvZHkiOiBqc29uLmR1bXBzKGJvZHkpLAogICAgfQoKCmRlZiBoYW5kbGVyKGV2ZW50LCBjb250ZXh0KToKICAgIHVzZXJzLCBwb3N0cyA9IG9zLmVudmlyb25bIlVTRVJTX1RBQkxFIl0sIG9zLmVudmlyb25bIlBPU1RTX1RBQkxFIl0KICAgIHJvdXRlID0gKGV2ZW50LmdldCgiaHR0cE1ldGhvZCIpLCBldmVudC5nZXQoInJlc291cmNlIikpCgogICAgaWYgcm91dGUgPT0gKCJHRVQiLCAiL2hlYWx0aCIpOgogICAgICAgIHRyeToKICAgICAgICAgICAgZm9yIHRhYmxlIGluICh1c2VycywgcG9zdHMpOgogICAgICAgICAgICAgICAgX0REQi5nZXRfaXRlbShUYWJsZU5hbWU9dGFibGUsIEtleT17InBrIjogeyJTIjogImhlYWx0aCJ9fSkKICAgICAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGV4YzogICMgdGhlIGNhbGxlciBuZWVkcyB0aGUgY2xhc3Mgb2YgZmFpbHVyZSwgbm90IGEgNTAyIHdpdGhvdXQgYm9keQogICAgICAgICAgICByZXR1cm4gX3Jlc3AoNTAzLCB7InN0YXR1cyI6ICJkZWdyYWRlZCIsICJlcnJvciI6IHR5cGUoZXhjKS5fX25hbWVfX30pCiAgICAgICAgcmV0dXJuIF9yZXNwKDIwMCwgeyJzdGF0dXMiOiAib2siLCAidGFibGVzIjogMn0pCgogICAgaWYgcm91dGUgPT0gKCJHRVQiLCAiL2l0ZW1zIik6CiAgICAgICAgb3V0ID0gX0REQi5zY2FuKFRhYmxlTmFtZT1wb3N0cywgTGltaXQ9MjApCiAgICAgICAgaXRlbXMgPSBbeyJpZCI6IGlbInBrIl1bIlMiXSwgInRleHQiOiBpLmdldCgidGV4dCIsIHt9KS5nZXQoIlMiLCAiIil9IGZvciBpIGluIG91dC5nZXQoIkl0ZW1zIiwgW10pXQogICAgICAgIHJldHVybiBfcmVzcCgyMDAsIHsiaXRlbXMiOiBpdGVtc30pCgogICAgaWYgcm91dGUgPT0gKCJQT1NUIiwgIi9pdGVtcyIpOgogICAgICAgIHRyeToKICAgICAgICAgICAgYm9keSA9IGpzb24ubG9hZHMoZXZlbnQuZ2V0KCJib2R5Iikgb3IgInt9IikKICAgICAgICBleGNlcHQgVmFsdWVFcnJvcjoKICAgICAgICAgICAgcmV0dXJuIF9yZXNwKDQwMCwgeyJlcnJvciI6ICJib2R5IG11c3QgYmUgSlNPTiJ9KQogICAgICAgIGl0ZW1faWQsIHRleHQgPSBib2R5LmdldCgiaWQiKSwgYm9keS5nZXQoInRleHQiKQogICAgICAgIGlmIG5vdCAoaXNpbnN0YW5jZShpdGVtX2lkLCBzdHIpIGFuZCBfSUQubWF0Y2goaXRlbV9pZCkgYW5kIGlzaW5zdGFuY2UodGV4dCwgc3RyKSBhbmQgbGVuKHRleHQpIDw9IE1BWF9URVhUKToKICAgICAgICAgICAgcmV0dXJuIF9yZXNwKDQwMCwgeyJlcnJvciI6IGYiZXhwZWN0ZWQgaWQgbWF0Y2hpbmcge19JRC5wYXR0ZXJufSBhbmQgdGV4dCB1cCB0byB7TUFYX1RFWFR9IGNoYXJhY3RlcnMifSkKICAgICAgICBfRERCLnB1dF9pdGVtKFRhYmxlTmFtZT1wb3N0cywgSXRlbT17InBrIjogeyJTIjogaXRlbV9pZH0sICJ0ZXh0IjogeyJTIjogdGV4dH19KQogICAgICAgIHJldHVybiBfcmVzcCgyMDEsIHsiaWQiOiBpdGVtX2lkfSkKCiAgICByZXR1cm4gX3Jlc3AoNDA0LCB7ImVycm9yIjogIm5vdCBmb3VuZCJ9KQpQSwECFAMUAAAAAAAAACEACxVQbTMKAAAzCgAABwAAAAAAAAAAAAAApAEAAAAAbWFpbi5weVBLBQYAAAAAAQABADUAAABYCgAAAAA="
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: code-bucket}
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.key
+                toFieldPath: status.codeKey
+          - name: log-group
+            base:
+              apiVersion: cloudwatchlogs.aws.m.upbound.io/v1beta1
+              kind: Group
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  retentionInDays: 14
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.functionName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "/aws/lambda/%s"}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+          - name: function
+            base:
+              apiVersion: lambda.aws.m.upbound.io/v1beta1
+              kind: Function
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  packageType: Zip
+                  runtime: python3.14
+                  architectures: [arm64]
+                  handler: main.handler
+                  timeout: 10
+                  sourceCodeHash: "r6Y5+cDTGvuyYWPgALIopW9HBEnfDTLQ8GJctrIa08s="
+                  loggingConfig:
+                    logFormat: JSON
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.functionName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.functionName
+                toFieldPath: spec.forProvider.loggingConfig.logGroup
+                transforms:
+                  - {type: string, string: {type: Format, fmt: "/aws/lambda/%s"}}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.codeBucketName
+                toFieldPath: spec.forProvider.s3Bucket
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.codeKey
+                toFieldPath: spec.forProvider.s3Key
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.roleArn
+                toFieldPath: spec.forProvider.role
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.memorySize
+                toFieldPath: spec.forProvider.memorySize
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.environment
+                toFieldPath: spec.forProvider.environment.variables
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.arn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.name
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.invokeArn
+                toFieldPath: status.invokeArn
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapirest
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: serverless.platform.sample.lab/v1alpha1
+    kind: XApiRest
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+        resources:
+          - name: restapi
+            base:
+              apiVersion: apigateway.aws.m.upbound.io/v1beta1
+              kind: RestAPI
+              metadata:
+                labels: {serverless.platform.sample.lab/resource: restapi}
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  endpointConfiguration:
+                    types: [REGIONAL]
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.apiName
+                toFieldPath: spec.forProvider.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.apiName
+                toFieldPath: spec.forProvider.description
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.openApiSpecification
+                toFieldPath: spec.forProvider.body
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.restApiId
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.executionArn
+                toFieldPath: status.executionArn
+          - name: deployment
+            base:
+              apiVersion: apigateway.aws.m.upbound.io/v1beta1
+              kind: Deployment
+              metadata:
+                labels: {serverless.platform.sample.lab/resource: deployment}
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  description: platform recipe deployment
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels: {serverless.platform.sample.lab/resource: restapi}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.openApiSpecification
+                toFieldPath: spec.forProvider.triggers[redeployment]
+                policy: {fromFieldPath: Required}
+                transforms:
+                  - {type: string, string: {type: Convert, convert: ToSha256}}
+          - name: stage
+            base:
+              apiVersion: apigateway.aws.m.upbound.io/v1beta1
+              kind: Stage
+              metadata:
+                labels: {serverless.platform.sample.lab/resource: stage}
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  xrayTracingEnabled: true
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels: {serverless.platform.sample.lab/resource: restapi}
+                  deploymentIdSelector:
+                    matchControllerRef: true
+                    matchLabels: {serverless.platform.sample.lab/resource: deployment}
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.stageName
+                toFieldPath: spec.forProvider.stageName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.invokeUrl
+                toFieldPath: status.invokeUrl
+          - name: method-settings
+            base:
+              apiVersion: apigateway.aws.m.upbound.io/v1beta1
+              kind: MethodSettings
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  methodPath: "*/*"
+                  restApiIdSelector:
+                    matchControllerRef: true
+                    matchLabels: {serverless.platform.sample.lab/resource: restapi}
+                  stageNameSelector:
+                    matchControllerRef: true
+                    matchLabels: {serverless.platform.sample.lab/resource: stage}
+                  settings:
+                    metricsEnabled: true
+                    loggingLevel: "OFF"
+                    throttlingBurstLimit: 20
+                    throttlingRateLimit: 10
+            patches:
+              - {type: PatchSet, patchSetName: region}
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xspa
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: serverless.platform.sample.lab/v1alpha1
+    kind: XSpa
+  mode: Pipeline
+  pipeline:
+    - step: resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: region
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+          - name: web-bucket
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.bucketName
+                toFieldPath: spec.forProvider.bucket
+        resources:
+          - name: web-bucket
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  forceDestroy: true
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.bucketName
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.bucketRegionalDomainName
+                toFieldPath: status.bucketRegionalDomainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.bucketName
+          - name: web-bucket-public-access-block
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+          - name: web-bucket-encryption
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: AES256
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+          - name: web-bucket-versioning
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  versioningConfiguration:
+                    status: Enabled
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+          - name: web-bucket-ownership
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketOwnershipControls
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  rule:
+                    objectOwnership: BucketOwnerEnforced
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+          - name: index
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Object
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  key: index.html
+                  contentType: text/html; charset=utf-8
+                  cacheControl: no-cache
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+              - type: CombineFromComposite
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: spec.app
+                    - fromFieldPath: spec.apiUrl
+                  string:
+                    fmt: |-
+                      <!doctype html>
+                      <html lang="en">
+                      <head><meta charset="utf-8"><title>%[1]s</title></head>
+                      <body>
+                      <h1>%[1]s</h1>
+                      <p>Static tier: CloudFront and a private S3 bucket. API tier: API Gateway, Lambda and DynamoDB.</p>
+                      <p>API health: <code id="health">checking</code></p>
+                      <script>
+                      fetch("%[2]s/health").then(function (r) { return r.json(); })
+                        .then(function (b) { document.getElementById("health").textContent = b.status; })
+                        .catch(function (e) { document.getElementById("health").textContent = "unreachable"; });
+                      </script>
+                      </body>
+                      </html>
+                toFieldPath: spec.forProvider.content
+                policy: {fromFieldPath: Required}
+          - name: distribution
+            base:
+              apiVersion: cloudfront.aws.m.upbound.io/v1beta1
+              kind: Distribution
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider:
+                  enabled: true
+                  isIpv6Enabled: true
+                  httpVersion: http2and3
+                  defaultRootObject: index.html
+                  priceClass: PriceClass_200
+                  defaultCacheBehavior:
+                    targetOriginId: s3-web
+                    viewerProtocolPolicy: redirect-to-https
+                    allowedMethods: [GET, HEAD, OPTIONS]
+                    cachedMethods: [GET, HEAD, OPTIONS]
+                    compress: true
+                    cachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6           # Managed-CachingOptimized
+                    originRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf   # Managed-CORS-S3Origin
+                    responseHeadersPolicyId: eaab4381-ed33-4a86-88ca-d9558dc6cd63 # Managed-CORS-with-preflight-and-SecurityHeadersPolicy
+                  origin:
+                    - originId: s3-web
+                  restrictions:
+                    geoRestriction:
+                      restrictionType: none
+                  viewerCertificate:
+                    cloudfrontDefaultCertificate: true
+                  tags: {managed-by: crossplane, platform: sample-plat, recipe: serverless-multi-tier}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.bucketName
+                toFieldPath: spec.forProvider.comment
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.bucketRegionalDomainName
+                toFieldPath: spec.forProvider.origin[0].domainName
+                policy: {fromFieldPath: Required}
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.oacId
+                toFieldPath: spec.forProvider.origin[0].originAccessControlId
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.team
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.app
+                toFieldPath: spec.forProvider.tags[app]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.distributionArn
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.domainName
+                toFieldPath: status.domainName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.partition
+                transforms:
+                  - {type: string, string: {type: Regexp, regexp: {match: "^arn:([^:]+):cloudfront:", group: 1}}}
+          - name: web-bucket-policy
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPolicy
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: platform-pod-identity}
+                forProvider: {}
+            patches:
+              - {type: PatchSet, patchSetName: region}
+              - {type: PatchSet, patchSetName: web-bucket}
+              - type: CombineFromComposite
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: spec.bucketName
+                    - fromFieldPath: status.distributionArn
+                    - fromFieldPath: status.partition
+                  string:
+                    fmt: |-
+                      {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                          {
+                            "Sid": "AllowThisDistributionReadOnly",
+                            "Effect": "Allow",
+                            "Principal": {"Service": "cloudfront.amazonaws.com"},
+                            "Action": "s3:GetObject",
+                            "Resource": "arn:%[3]s:s3:::%[1]s/*",
+                            "Condition": {"StringEquals": {"AWS:SourceArn": "%[2]s"}}
+                          },
+                          {
+                            "Sid": "DenyInsecureTransport",
+                            "Effect": "Deny",
+                            "Principal": "*",
+                            "Action": "s3:*",
+                            "Resource": ["arn:%[3]s:s3:::%[1]s", "arn:%[3]s:s3:::%[1]s/*"],
+                            "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+                          }
+                        ]
+                      }
+                toFieldPath: spec.forProvider.policy
+                policy: {fromFieldPath: Required}

@@ -46,6 +46,82 @@ spec:
   runtimeConfigRef:
     name: provider-aws-dynamodb
 ---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-lambda
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-lambda
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-lambda
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-lambda:v2.9.0@sha256:da3b160bbdbf5e54a7f744a454ecf008d13581afb6f8abed427cf9affae1bf7f
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-lambda
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-apigateway
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-apigateway
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-apigateway
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-apigateway:v2.9.0@sha256:6f5763aeac20585a331d584c6ceef2122de05a897d9979f753a4256475072480
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-apigateway
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-cloudfront
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-cloudfront
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-cloudfront
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-cloudfront:v2.9.0@sha256:2dc209dc4d9746560010e79655ae8697e0ebc06bcd4181c6449441b28cdaada9
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-cloudfront
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-cloudwatchlogs
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-aws-cloudwatchlogs
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-cloudwatchlogs
+spec:
+  package: harbor.local/crossplane-contrib/provider-aws-cloudwatchlogs:v2.9.0@sha256:f6199a5f3dc631b179eeffcb542a7a6c34f40e374f1737ca17319b702ead1d05
+  skipDependencyResolution: true
+  runtimeConfigRef:
+    name: provider-aws-cloudwatchlogs
+---
 apiVersion: pkg.crossplane.io/v1
 kind: Function
 metadata:

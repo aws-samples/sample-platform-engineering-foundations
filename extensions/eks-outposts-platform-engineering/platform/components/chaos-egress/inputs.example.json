@@ -1,0 +1,30 @@
+{
+  "cluster_name": "platform-outposts",
+  "node_subnet_cidr": "10.40.1.0/24",
+  "service_cidr": "172.20.0.0/16",
+  "kubernetes_service_ip": "172.20.0.1",
+  "operator_ips": [
+    "10.40.0.10"
+  ],
+  "extra_preserve_cidrs": [],
+  "target_namespaces": [
+    "argocd",
+    "git-local",
+    "registry-local",
+    "victorialogs"
+  ],
+  "duration": "8m",
+  "interval_seconds": 20,
+  "region_probe": "sts.us-west-2.amazonaws.com:443",
+  "internet_probe": "github.com:443",
+  "local_probes": [
+    "kubernetes.default.svc.cluster.local:443",
+    "gitea-http.git-local.svc.cluster.local:3000",
+    "harbor.registry-local.svc.cluster.local:443",
+    "argocd-server.argocd.svc.cluster.local:80",
+    "vmsingle-victoria-metrics-victoria-metrics-k8s-stack.monitoring.svc.cluster.local:8428",
+    "victorialogs-server.victorialogs.svc.cluster.local:9428"
+  ],
+  "probe_image": "harbor.local/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e",
+  "argocd_root_application": "platform-root"
+}

@@ -1,0 +1,446 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-connectivity-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform-connectivity.json: |
+    {
+      "title": "Platform connectivity during disconnection",
+      "uid": "platform-connectivity",
+      "schemaVersion": 39,
+      "editable": false,
+      "refresh": "10s",
+      "time": {
+        "from": "now-15m",
+        "to": "now"
+      },
+      "timezone": "utc",
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          },
+          {
+            "name": "region_transition",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "VictoriaMetrics"
+            },
+            "enable": true,
+            "iconColor": "orange",
+            "expr": "changes(platform_probe_success{vantage=\"cut\",target_class=\"region\"}[1m]) > 0",
+            "step": "10s",
+            "titleFormat": "Region state change (cut vantage)",
+            "textFormat": "{{target_name}}"
+          },
+          {
+            "name": "retail_namespace_created",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "VictoriaMetrics"
+            },
+            "enable": true,
+            "iconColor": "purple",
+            "expr": "kube_namespace_created{namespace=~\"retail-.+\"} * 1000",
+            "step": "10s",
+            "titleFormat": "Retail namespace created by Argo CD sync",
+            "textFormat": "{{namespace}}",
+            "useValueForTime": true
+          },
+          {
+            "name": "retail_ready",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "VictoriaMetrics"
+            },
+            "enable": true,
+            "iconColor": "green",
+            "expr": "min by (namespace) (kube_deployment_status_replicas_ready{namespace=~\"retail-.+\"}) >= 1",
+            "step": "10s",
+            "titleFormat": "Retail Ready",
+            "textFormat": "{{namespace}}"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "state-timeline",
+          "title": "Connectivity State Timeline",
+          "description": "UP/DOWN per vantage (cut = inside the cut, control = outside it) and target class. Only samples younger than 90 s count: a stale series shows as a gap here and as a high age in Scrape Integrity, never as DOWN. The probe samples row says FRESH when any probe has a fresh sample and NO SAMPLE outside a Chaos run: it explains empty rows. To review a past run, set the time range over it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "UP",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "probe_samples_fresh"
+                },
+                "properties": [
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "0": {
+                            "text": "NO SAMPLE",
+                            "color": "#8e8e8e",
+                            "index": 0
+                          },
+                          "1": {
+                            "text": "FRESH",
+                            "color": "blue",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showValue": "always",
+            "mergeValues": true,
+            "rowHeight": 0.8,
+            "alignValue": "center",
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "connectivity_state",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "min by (vantage, target_class) (platform_probe_success and on (vantage, target_class, target_name) (time() - platform_probe_sample_timestamp_seconds < 90))",
+              "legendFormat": "{{vantage}} / {{target_class}}"
+            },
+            {
+              "refId": "probe_samples_fresh",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "(count(platform_probe_success and on (vantage, target_class, target_name) (time() - platform_probe_sample_timestamp_seconds < 90)) > bool 0) or vector(0)",
+              "legendFormat": "probe samples"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "state-timeline",
+          "title": "Local Services",
+          "description": "Local services seen from inside the cut (TCP probe) and the Retail Store by available replica (kube-state-metrics). The Retail Store appears only after its Argo CD sync.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 24,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "UP",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showValue": "always",
+            "mergeValues": true,
+            "rowHeight": 0.8,
+            "alignValue": "center",
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "local_services_probe",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "min by (target_name) (platform_probe_success{vantage=\"cut\",target_class=\"local\"} and on (vantage, target_class, target_name) (time() - platform_probe_sample_timestamp_seconds{vantage=\"cut\",target_class=\"local\"} < 90))",
+              "legendFormat": "{{target_name}}"
+            },
+            {
+              "refId": "local_workloads_ready",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "min by (namespace, deployment) (kube_deployment_status_replicas_available{namespace=~\"retail-.+\"} > bool 0)",
+              "legendFormat": "{{namespace}}/{{deployment}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Scrape Integrity",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "description": "Is the collector alive? up per vantage, age of the oldest sample (above 90 s is stale) and number of series per vantage. Without control, DOWN in cut does not prove a cut.",
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "scrape_up"
+                },
+                "properties": [
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "0": {
+                            "text": "NOT SCRAPED",
+                            "color": "red",
+                            "index": 0
+                          },
+                          "1": {
+                            "text": "SCRAPED",
+                            "color": "green",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "sample_age"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 90
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "textMode": "value_and_name",
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "refId": "scrape_up",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "max by (vantage) (up{namespace=~\"egress-chaos-probe|egress-chaos-control\"})",
+              "legendFormat": "up {{vantage}}"
+            },
+            {
+              "refId": "sample_age",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "max by (vantage, target_class) (time() - platform_probe_sample_timestamp_seconds)",
+              "legendFormat": "age {{vantage}} / {{target_class}}"
+            },
+            {
+              "refId": "vantage_series",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "count by (vantage) (platform_probe_success)",
+              "legendFormat": "series {{vantage}}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "bargauge",
+          "title": "Unavailable seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "description": "Seconds with the class DOWN in the last 15 minutes (samples up to 30 s apart).",
+          "gridPos": {
+            "x": 12,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "basic",
+            "showUnfilled": true,
+            "valueMode": "text",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "refId": "unavailable_seconds",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetrics"
+              },
+              "expr": "sum_over_time((min by (vantage, target_class) (platform_probe_success) == bool 0)[15m:10s]) * 10",
+              "legendFormat": "{{vantage}} / {{target_class}}"
+            }
+          ]
+        }
+      ]
+    }

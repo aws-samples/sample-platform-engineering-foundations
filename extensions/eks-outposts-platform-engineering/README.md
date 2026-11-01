@@ -9,7 +9,7 @@
 | Team | AWS LATAM Containers |
 | Scope | Platform Engineering on Amazon EKS local clusters on AWS Outposts |
 | Document status | Reference implementation |
-| Last updated | October 23, 2026 |
+| Last updated | October 31, 2026 |
 | Contact | [@brunokktro](https://github.com/brunokktro) |
 
 This extension is a Platform Engineering demo that runs on [Amazon EKS local clusters on AWS Outposts](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-local-cluster-overview.html). The Kubernetes control plane, self-managed worker nodes, and a local platform (Git, registry, GitOps, observability, DNS caching, NetworkPolicies, and Crossplane recipes) run on the Outpost. Platform data lives on Amazon EBS gp2 volumes on the Outpost through the Amazon EBS CSI driver. The extension does not change the repository's existing workshop or self-paced flow.
@@ -50,14 +50,14 @@ Choose exactly one front for an environment. Both converge on the same architect
 
 No platform implementation is duplicated between the fronts. Neither CloudFormation nor Terraform declares the VPC CNI or the Amazon EBS CSI driver add-on. The shared bootstrap is the single owner of both: strict NetworkPolicy enforcement with policy event logging, and the pinned `aws-ebs-csi-driver` add-on with the `platform-ebs-gp2` StorageClass. Both fronts attach `AmazonEBSCSIDriverPolicy` to the worker node role, so the driver authenticates with the node instance profile, and `ebs_csi_controller_credential_cidr` opens only the instance metadata endpoint to the controller.
 
-`python3 scripts/check-iac-parity.py` exercises both contract emitters with the same synthetic environment, compares all 12 normalized keys and values, checks both entry points, compares the Crossplane Pod Identity trust and permission boundaries, and checks the EBS storage boundary: add-on ownership and bootstrap order, the node role policy in both fronts, the controller credential endpoint and its NetworkPolicy rule, the StorageClass, and the class named in every platform values file. Mutation controls prove that the gate detects contract, identity, permission, VPC CNI ownership, EBS CSI ownership and order, node policy, controller credential, StorageClass, and entry-point drift. When the pinned charts are fetched, `bash scripts/validate.sh` also renders them and requires every claim to use `platform-ebs-gp2`. `bash scripts/validate.sh` runs this gate automatically.
+`python3 scripts/check-iac-parity.py` exercises both contract emitters with the same synthetic environment, compares all 12 normalized keys and values, checks both entry points, compares the Crossplane Pod Identity trust and permission boundaries (including the serverless provider roles, the function runtime role, the CloudFront origin access control and their outputs), and checks the EBS storage boundary: add-on ownership and bootstrap order, the node role policy in both fronts, the controller credential endpoint and its NetworkPolicy rule, the StorageClass, and the class named in every platform values file. Mutation controls prove that the gate detects contract, identity, permission, VPC CNI ownership, EBS CSI ownership and order, node policy, controller credential, StorageClass, entry-point, and serverless least-privilege drift, and a closed inventory fails on any identity resource, managed policy or permissions boundary that is not part of the reviewed list. When the pinned charts are fetched, `bash scripts/validate.sh` also renders them and requires every claim to use `platform-ebs-gp2`. `bash scripts/validate.sh` runs this gate automatically.
 
 The shared path is:
 
 1. `bash scripts/fetch-charts.sh` downloads pinned third-party charts while connected and verifies every package against `scripts/charts.lock`. Charts and returned license files stay in the ignored runtime directory and are not committed to the public repository.
 2. The selected IaC front creates the network, cluster, self-managed nodes, core add-ons, and the Crossplane identity boundary.
 3. `bash platform/gitops/bootstrap.sh platform-contract.json` installs the Amazon EBS CSI driver and the `platform-ebs-gp2` StorageClass, then the local registry, local Git, Argo CD, logging add-on, and shared GitOps applications.
-4. The shared bootstrap configures the CoreDNS add-on. Argo CD reconciles NodeLocal DNSCache, local observability and logging, NetworkPolicies, Crossplane recipes, and the NetworkPolicy sample.
+4. The shared bootstrap configures the CoreDNS add-on. Argo CD reconciles NodeLocal DNSCache, local observability and logging, the connectivity dashboard, NetworkPolicies, Crossplane recipes, and the NetworkPolicy sample.
 5. `bash scripts/validate.sh --runtime` checks the running paths, including an EBS-backed smoke volume and the class of every platform claim. Follow `docs/validation.md` for the paired controls and disconnected test.
 
 ## Prerequisites
@@ -68,13 +68,30 @@ The shared path is:
 - A TLS certificate and private key for `harbor.local`, plus its public CA certificate. The certificate and key stay outside Git.
 - Pinned versions for the Amazon EBS CSI driver (`EBS_CSI_ADDON_VERSION`), Pod Identity agent, VPC CNI, CoreDNS, and fluent-bit EKS add-ons.
 
+## Disconnection demo
+
+Three additions turn the platform into a demonstration of what keeps working without the AWS Region, and one shows what comes back with it. All of them reuse the local Git, registry, GitOps and observability of the shared path.
+
+| Capability | Location | How it runs |
+|---|---|---|
+| Local Retail Store: the storefront of the AWS Retail Store sample with a real cart in DynamoDB Local, no route out of its namespace | [`platform/apps/retail-store`](platform/apps/retail-store/README.md) | Argo CD Application `retail-store`, rendered only for a cluster Secret labeled `enable_retail_store=true` |
+| Egress cut: a time-boxed Chaos Mesh `NetworkChaos` that cuts platform pod egress to the Region and the Internet, with paired `cut` and `control` probes and an 8-minute scene | [`platform/components/chaos-egress`](platform/components/chaos-egress/README.md) | Installed and run by the operator with `bash` and `python3`; removed after the demo |
+| Connectivity dashboard and queries: the Grafana dashboard **Platform connectivity during disconnection** and the VMUI queries over the probe series | [`platform/components/observability`](platform/components/observability/connectivity/QUERIES.md) | Argo CD Application `platform-dashboards`; the queries live in `platform/components/observability/connectivity/queries.yaml` |
+| Serverless multi-tier recipe: DynamoDB, Lambda, API Gateway, S3 and CloudFront through Crossplane, with one Pod Identity role per provider in both IaC fronts | [`platform/components/crossplane`](platform/components/crossplane/README.md#serverless-multi-tier) | Claim applied by the operator **after** the egress recovery; every resource is Regional or global, and `crossplane-system` is not a cut target |
+
+The scene: start the egress cut, enable the Retail Store during the cut, use it through `kubectl port-forward` while the dashboard shows the Region and the Internet down inside the cut and up in the control vantage, wait for the automatic recovery, then open the serverless claim. The order and commands are in [The 8-minute scene](platform/components/chaos-egress/README.md#the-8-minute-scene).
+
+`bash scripts/validate.sh` runs the offline suites of these components, the serverless parity checks of `python3 scripts/check-iac-parity.py`, and `python3 scripts/check-reachability.py`, which proves that every file of the extension is reachable from this README, a manifest, the ApplicationSet or a test, and that no two files have the same content.
+
 ## Deliberately omitted source features
 
 The public package omits the source MetalLB L2 and dedicated L4 VIP paths. The selected source did not provide a completed, hardware-validated external reachability path for an Outposts VPC subnet. The NetworkPolicy demo remains internal to the cluster and uses paired pod-to-pod controls. Add an external exposure method only after validating ownership and routing for the target subnet.
 
+For the same reason, the source shared VIP that exposed the Retail Store on port 80 and a sample application on port 9898 behind one load balancer address is omitted: every Retail Store Service is `ClusterIP`, its quota allows no load balancer or node port, and the storefront is reached with `kubectl port-forward`. The source Backstage golden paths for the Retail Store and the serverless recipe are omitted as well, because this package has no developer portal: the cluster Secret label enables the store, and the operator applies the serverless claim with `kubectl`.
+
 ## Validation boundary
 
-The storage architecture comes from a source implementation that ran on an Outpost rack offering gp2 only, with Kubernetes 1.33 local clusters built by both fronts and self-managed `c5d.xlarge` workers. On both clusters, platform claims were bound to EBS gp2 volumes on the Outpost through the `aws-ebs-csi-driver` add-on. On the Terraform-built cluster the controller used the node instance profile, which is the credential path this package implements. On the CloudFormation-built cluster the controller used a dedicated Pod Identity role during those measurements; there, data survived pod deletion, and a database volume moved between nodes. That run bound the platform claims through the cluster-provided `gp2` class. This package names the CSI gp2 class from the Amazon EKS guidance explicitly; the source exercised that class with standalone volumes on the same rack. This public package as assembled here has not been deployed end to end. Run the connected and disconnected checks in `docs/validation.md` on the target Outpost before describing a deployment as validated.
+The storage architecture comes from a source implementation that ran on an Outpost rack offering gp2 only, with Kubernetes 1.33 local clusters built by both fronts and self-managed `c5d.xlarge` workers. On both clusters, platform claims were bound to EBS gp2 volumes on the Outpost through the `aws-ebs-csi-driver` add-on. On the Terraform-built cluster the controller used the node instance profile, which is the credential path this package implements. On the CloudFormation-built cluster the controller used a dedicated Pod Identity role during those measurements; there, data survived pod deletion, and a database volume moved between nodes. That run bound the platform claims through the cluster-provided `gp2` class. This package names the CSI gp2 class from the Amazon EKS guidance explicitly; the source exercised that class with standalone volumes on the same rack. This public package as assembled here has not been deployed end to end. The Retail Store, egress cut, connectivity dashboard and serverless recipe added on October 31, 2026 are covered by offline tests only in this package. Run the connected and disconnected checks in `docs/validation.md` on the target Outpost before describing a deployment as validated.
 
 > [!WARNING]
 > During a network disconnect, [pods backed by Amazon EBS cannot be created, updated, or scaled](https://docs.aws.amazon.com/eks/latest/userguide/eks-outposts-network-disconnects.html), and EBS snapshots cannot be created or deleted, because those operations call regional APIs.
@@ -98,6 +115,8 @@ The detailed decision matrix, prerequisites, and validation status are in [Stora
 
 ## Cleanup
 
+Before removing the infrastructure, delete every `XServerlessMultiTier` claim and wait until it is gone, because the cleanup script does not remove Regional resources created by Crossplane. Remove the Retail Store as described in its [README](platform/apps/retail-store/README.md#enable-use-and-remove), and uninstall Chaos Mesh with `bash platform/components/chaos-egress/install.sh uninstall --inputs ~/egress-inputs.json --context <ctx>`, using the same inputs file as the [egress cut](platform/components/chaos-egress/README.md#rollback-and-uninstall).
+
 Use `bash scripts/cleanup.sh` with the chosen front. The script requires an explicit `DELETE` confirmation and targets only the named stacks or Terraform state supplied by the operator. Before it removes the infrastructure, it writes an inventory of the EBS volumes that the EBS CSI driver provisioned through `platform-ebs-gp2` with reclaim policy `Delete`, outside Git. Afterwards it deletes only those volumes, only after they are `available` and carry the driver's `ebs.csi.aws.com/cluster` and matching `CSIVolumeName` tags. Volumes it cannot delete stay in the inventory, and `bash scripts/cleanup.sh volumes <inventory-file>` retries only that step.
 
-See [Architecture](docs/architecture.md), [Validation](docs/validation.md), and [Amazon EBS storage](platform/components/storage/README.md).
+See [Architecture](docs/architecture.md), [Validation](docs/validation.md), [Amazon EBS storage](platform/components/storage/README.md), [Local Retail Store](platform/apps/retail-store/README.md), [Egress cut with Chaos Mesh](platform/components/chaos-egress/README.md), [Connectivity queries](platform/components/observability/connectivity/QUERIES.md), and [Crossplane recipes](platform/components/crossplane/README.md).

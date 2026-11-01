@@ -5,6 +5,8 @@ Parameters:
   ClusterName:
     Type: String
     Default: platform-outposts-cfn
+    MaxLength: 38
+    ConstraintDescription: keeps every Crossplane role name within the IAM limit of 64 characters
   NamePrefix:
     Type: String
     Default: sample-plat-
@@ -18,6 +20,18 @@ Parameters:
   DynamoDbServiceAccount:
     Type: String
     Default: provider-aws-dynamodb
+  LambdaServiceAccount:
+    Type: String
+    Default: provider-aws-lambda
+  ApiGatewayServiceAccount:
+    Type: String
+    Default: provider-aws-apigateway
+  CloudFrontServiceAccount:
+    Type: String
+    Default: provider-aws-cloudfront
+  LogsServiceAccount:
+    Type: String
+    Default: provider-aws-cloudwatchlogs
 
 Resources:
   ProviderRole:
@@ -76,6 +90,266 @@ Resources:
       ServiceAccount: !Ref DynamoDbServiceAccount
       RoleArn: !GetAtt ProviderRole.Arn
 
+  ServerlessRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${NamePrefix}runtime-${ClusterName}"
+      Description: Execution role shared by the functions of the serverless multi-tier recipe.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaService
+            Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: ["sts:AssumeRole"]
+      Policies:
+        - PolicyName: sample-plat-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: RecipeTables
+                Effect: Allow
+                Action: ["dynamodb:BatchGetItem", "dynamodb:BatchWriteItem", "dynamodb:DeleteItem", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:UpdateItem"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NamePrefix}*/index/*"
+              - Sid: RecipeLogs
+                Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NamePrefix}*:*"
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  ServerlessOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${NamePrefix}spa-${ClusterName}"
+        Description: Origin access control shared by the static sites of the serverless multi-tier recipe.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  LambdaProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-crossplane-lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: ["sts:AssumeRole", "sts:TagSession"]
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+      Policies:
+        - PolicyName: sample-plat-lambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: FunctionsInPrefix
+                Effect: Allow
+                Action: ["lambda:CreateFunction", "lambda:DeleteFunction", "lambda:GetFunction", "lambda:GetFunctionCodeSigningConfig", "lambda:GetFunctionConfiguration", "lambda:GetPolicy", "lambda:ListTags", "lambda:ListVersionsByFunction", "lambda:TagResource", "lambda:UntagResource", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${NamePrefix}*:*"
+              - Sid: InvokePermissionForApiGateway
+                Effect: Allow
+                Action: ["lambda:AddPermission", "lambda:RemovePermission"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${NamePrefix}*:*"
+                Condition:
+                  StringEquals:
+                    lambda:Principal: apigateway.amazonaws.com
+              - Sid: ReadCodeInPrefix
+                Effect: Allow
+                Action: ["s3:GetObject", "s3:GetObjectVersion"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${NamePrefix}*/*"
+              - Sid: PassRuntimeRoleToLambda
+                Effect: Allow
+                Action: ["iam:PassRole"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${NamePrefix}runtime-${ClusterName}"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  ApiGatewayProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-crossplane-apigateway"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: ["sts:AssumeRole", "sts:TagSession"]
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+      Policies:
+        - PolicyName: sample-plat-apigateway
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateTaggedRestApis
+                Effect: Allow
+                Action: ["apigateway:POST"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis"
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/platform: sample-plat
+              - Sid: ReadRestApis
+                Effect: Allow
+                Action: ["apigateway:GET"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis"
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/*"
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*"
+              - Sid: ManageTaggedRestApis
+                Effect: Allow
+                Action: ["apigateway:DELETE", "apigateway:PATCH", "apigateway:POST", "apigateway:PUT"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/platform: sample-plat
+              - Sid: TagRecipeRestApis
+                Effect: Allow
+                Action: ["apigateway:DELETE", "apigateway:PUT"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*"
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  CloudFrontProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-crossplane-cloudfront"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: ["sts:AssumeRole", "sts:TagSession"]
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+      Policies:
+        - PolicyName: sample-plat-cloudfront
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateTaggedDistribution
+                Effect: Allow
+                Action: ["cloudfront:CreateDistribution"]
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/platform: sample-plat
+              - Sid: ObserveDistributions
+                Effect: Allow
+                Action: ["cloudfront:GetDistribution", "cloudfront:ListTagsForResource"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+              - Sid: ManageTaggedDistributions
+                Effect: Allow
+                Action: ["cloudfront:DeleteDistribution", "cloudfront:TagResource", "cloudfront:UntagResource", "cloudfront:UpdateDistribution"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/platform: sample-plat
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  LogsProviderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-crossplane-cloudwatchlogs"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: ["sts:AssumeRole", "sts:TagSession"]
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+      Policies:
+        - PolicyName: sample-plat-cloudwatchlogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: FunctionLogGroupsInPrefix
+                Effect: Allow
+                Action: ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:ListTagsForResource", "logs:PutRetentionPolicy", "logs:TagLogGroup", "logs:TagResource", "logs:UntagResource"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NamePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NamePrefix}*:*"
+              - Sid: AccountLevelReads
+                Effect: Allow
+                Action: ["logs:DescribeLogGroups"]
+                Resource: "*"
+      Tags:
+        - {Key: project, Value: sample-platform}
+        - {Key: component, Value: provisioning-recipes}
+
+  LambdaAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref LambdaServiceAccount
+      RoleArn: !GetAtt LambdaProviderRole.Arn
+
+  ApiGatewayAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref ApiGatewayServiceAccount
+      RoleArn: !GetAtt ApiGatewayProviderRole.Arn
+
+  CloudFrontAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref CloudFrontServiceAccount
+      RoleArn: !GetAtt CloudFrontProviderRole.Arn
+
+  LogsAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref Namespace
+      ServiceAccount: !Ref LogsServiceAccount
+      RoleArn: !GetAtt LogsProviderRole.Arn
+
 Outputs:
   ProviderRoleArn:
     Value: !GetAtt ProviderRole.Arn
+  ServerlessRuntimeRoleArn:
+    Value: !GetAtt ServerlessRuntimeRole.Arn
+  ServerlessOacId:
+    Value: !GetAtt ServerlessOriginAccessControl.Id

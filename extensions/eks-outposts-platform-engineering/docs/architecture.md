@@ -49,6 +49,10 @@ The complete recommendation, prerequisites, validation status, and sources are i
 4. Argo CD reads the platform repository from Gitea.
 5. VictoriaMetrics, VictoriaLogs, NodeLocal DNSCache, NetworkPolicies, Crossplane, and sample apps reconcile from local Git and images.
 
+## Disconnection demo
+
+The [egress cut](../platform/components/chaos-egress/README.md) removes the Region and the Internet from the platform pods for a bounded time, while the node subnet, the service range, link-local addresses and the operator hosts stay reachable. A `control` probe outside the cut measures the same targets, so a blocked Region inside the cut is attributable to the cut and not to the Region. The [Retail Store](../platform/apps/retail-store/README.md) is created during the cut from the local Gitea and Harbor and has no route out of its namespace. The [serverless recipe](../platform/components/crossplane/README.md#serverless-multi-tier) needs the Region and runs after the recovery.
+
 ## Failure boundaries
 
 - During a network disconnect, pods backed by Amazon EBS cannot be created, updated, or scaled, because volume operations call the regional EBS API. Schedule platform changes and node replacement while connected.

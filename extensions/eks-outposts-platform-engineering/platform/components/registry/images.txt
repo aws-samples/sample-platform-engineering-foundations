@@ -21,6 +21,10 @@ docker.io/victoriametrics/vmalert:v1.152.0@sha256:ba00566373eb8c72d70cbee123e27e
 ghcr.io/dexidp/dex:v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462|dexidp/dex:v2.45.1
 ghcr.io/stefanprodan/podinfo:6.15.0@sha256:ec73780a8425f59ea49f5bc8cdff0d598805a224fbaa1f86c67a244f250fa9da|apps/podinfo:6.15.0
 ghcr.io/victoriametrics/sync-job:v0.0.17|victoriametrics/sync-job:v0.0.17
+public.ecr.aws/aws-cli/aws-cli:2.39.1@sha256:3517c17b5f01637df3b6184a4280fbcc36e4ea38105954cade628ff17bb9a7b9|apps/aws-cli:2.39.1
+public.ecr.aws/aws-containers/retail-store-sample-cart:1.6.3@sha256:9ab627ec637bde4f9578e9dd9cdb0c58ff25a39a982cc83bf5d2baadc32958bb|apps/retail-store-sample-cart:1.6.3
+public.ecr.aws/aws-containers/retail-store-sample-ui:1.6.3@sha256:e5936e5286f55bb6eb6c8bc1746a67b5c8890bf1cd3699795598856a9f0590a0|apps/retail-store-sample-ui:1.6.3
+public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:1.25.1@sha256:58e980787da883cdc5b6d9c75f4b5f8946fcae9c73046a43f807b0f804f6fe4d|apps/aws-dynamodb-local:1.25.1
 public.ecr.aws/docker/library/redis:8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763|library/redis:8.6.4-alpine
 public.ecr.aws/karpenter/controller:1.14.1|karpenter/controller:1.14.1
 quay.io/argoproj/argocd:v3.5.3@sha256:dd3f47d5a5e4da563a7a398506e892481b358a7cec50abdf320c71aa55904bfa|argoproj/argocd:v3.5.3
@@ -33,7 +37,11 @@ registry.k8s.io/external-dns/external-dns:v0.23.0@sha256:1854499e2b08cee47c40a08
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.19.1@sha256:85108987d044b18a098126732f98602df408888c0f7d456241f5abefb9744bc1|kube-state-metrics/kube-state-metrics:v2.19.1
 registry.k8s.io/kubectl:v1.36.0|library/kubectl:v1.36.0
 xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.11.1@sha256:ac5d07e28facaa8a9782d0ae112ae7f149b451742a2d25f375f73449c8581b54|crossplane-contrib/function-patch-and-transform:v0.11.1
+xpkg.crossplane.io/crossplane-contrib/provider-aws-apigateway:v2.9.0@sha256:6f5763aeac20585a331d584c6ceef2122de05a897d9979f753a4256475072480|crossplane-contrib/provider-aws-apigateway:v2.9.0
+xpkg.crossplane.io/crossplane-contrib/provider-aws-cloudfront:v2.9.0@sha256:2dc209dc4d9746560010e79655ae8697e0ebc06bcd4181c6449441b28cdaada9|crossplane-contrib/provider-aws-cloudfront:v2.9.0
+xpkg.crossplane.io/crossplane-contrib/provider-aws-cloudwatchlogs:v2.9.0@sha256:f6199a5f3dc631b179eeffcb542a7a6c34f40e374f1737ca17319b702ead1d05|crossplane-contrib/provider-aws-cloudwatchlogs:v2.9.0
 xpkg.crossplane.io/crossplane-contrib/provider-aws-dynamodb:v2.9.0@sha256:ae03bce48f25bd2980a46d2d94239b2f8ae0441bf2d27be9613f7e156489ba6b|crossplane-contrib/provider-aws-dynamodb:v2.9.0
+xpkg.crossplane.io/crossplane-contrib/provider-aws-lambda:v2.9.0@sha256:da3b160bbdbf5e54a7f744a454ecf008d13581afb6f8abed427cf9affae1bf7f|crossplane-contrib/provider-aws-lambda:v2.9.0
 xpkg.crossplane.io/crossplane-contrib/provider-aws-s3:v2.9.0@sha256:6440c4f796517174438ac55a693e244936c4d24c41e38cbad98365e7ff6b893c|crossplane-contrib/provider-aws-s3:v2.9.0
 xpkg.crossplane.io/crossplane-contrib/provider-family-aws:v2.9.0@sha256:4b426b75d6c2b5cbc3270b4c2423c81cfd0ce7e7a7f5f02d2af305ba76944505|crossplane-contrib/provider-family-aws:v2.9.0
 xpkg.crossplane.io/crossplane/crossplane:v2.4.3@sha256:1c66261d805a73cade46e2ac94b665c73aebd4a00844de5fcae4bcadaa2be638|crossplane/crossplane:v2.4.3
